@@ -1,0 +1,26 @@
+# Photos and archives: large, and they contain camera GPS data and people
+*.zip
+src/images/
+images/
+
+# Sorted output (symlink trees)
+sorted*/
+
+# Local spend log of live TypeSafe calls (pythonproject.budget)
+.typesafe_spend.jsonl
+
+# PyCharm sample script
+src/main.py
+
+# Python / tooling
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+dist/
+build/
+*.egg-info/
+
+# IDE
+.idea/
+.vscode/

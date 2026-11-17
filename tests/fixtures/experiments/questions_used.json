@@ -1,0 +1,384 @@
+{
+ "A_plain": {
+  "animal": {
+   "type": "noul",
+   "instructions": "Is there a real, living animal in `photo`?",
+   "criteria": {
+    "true": "A real animal of any kind (mammal, bird, fish, reptile, insect, ...) is visible in the photo.",
+    "false": "The photo shows only people, objects, or scenery, or shows an animal only as a drawing, cartoon, toy, statue, or other depiction."
+   }
+  },
+  "species": {
+   "type": "choice",
+   "instructions": "Which kind of animal is in `photo`?",
+   "criteria": {
+    "moose": "A moose, including calves, cows without antlers, and moose that are partly hidden.",
+    "deer": "A white-tailed deer or mule deer.",
+    "elk": "An elk.",
+    "small_animal": "A smaller animal such as a raccoon, fox, bird, or rodent."
+   }
+  },
+  "species_rev": {
+   "type": "choice",
+   "instructions": "Which kind of animal is in `photo`?",
+   "criteria": {
+    "small_animal": "A smaller animal such as a raccoon, fox, bird, or rodent.",
+    "elk": "An elk.",
+    "deer": "A white-tailed deer or mule deer.",
+    "moose": "A moose, including calves, cows without antlers, and moose that are partly hidden."
+   }
+  },
+  "f_pale_legs": {
+   "type": "noul",
+   "instructions": "Does the animal in `photo` have long legs that look paler than its body?",
+   "criteria": {
+    "true": "The lower legs are long and clearly lighter than the body, like pale stockings.",
+    "false": "The legs are about the same shade as the body, or short, or not visible."
+   }
+  },
+  "f_white_rump": {
+   "type": "noul",
+   "instructions": "Does the animal in `photo` show a white patch on its rump or under its tail?",
+   "criteria": {
+    "true": "A distinct white patch is visible on the rump or the underside of the tail.",
+    "false": "The rump and tail are the same shade as the body, or not visible."
+   }
+  },
+  "f_hump": {
+   "type": "noul",
+   "instructions": "Does the animal in `photo` have a large, heavy body with a raised hump at the shoulders?",
+   "criteria": {
+    "true": "The body is bulky and the back rises to a hump above the front legs.",
+    "false": "The body is slim, or the back is level, or the body is not visible."
+   }
+  },
+  "f_head_visible": {
+   "type": "noul",
+   "instructions": "Is the head of the animal in `photo` visible?",
+   "criteria": {
+    "true": "Most of the head (face, ears or muzzle) can be seen.",
+    "false": "The head is hidden behind something, turned away, or out of the frame."
+   }
+  },
+  "f_long_muzzle": {
+   "type": "noul",
+   "instructions": "Does the animal in `photo` have a long, broad muzzle that overhangs its mouth?",
+   "criteria": {
+    "true": "The face ends in a long, heavy, drooping nose.",
+    "false": "The face is narrow and pointed, or the muzzle is not visible."
+   }
+  },
+  "where": {
+   "type": "box",
+   "instructions": "the animal in `photo`"
+  }
+ },
+ "B_nobanner": {
+  "animal": {
+   "type": "noul",
+   "instructions": "Is there a real, living animal in `photo`?",
+   "criteria": {
+    "true": "A real animal of any kind (mammal, bird, fish, reptile, insect, ...) is visible in the photo.",
+    "false": "The photo shows only people, objects, or scenery, or shows an animal only as a drawing, cartoon, toy, statue, or other depiction."
+   }
+  },
+  "species": {
+   "type": "choice",
+   "instructions": "Which kind of animal is in `photo`?",
+   "criteria": {
+    "moose": "A moose, including calves, cows without antlers, and moose that are partly hidden.",
+    "deer": "A white-tailed deer or mule deer.",
+    "elk": "An elk.",
+    "small_animal": "A smaller animal such as a raccoon, fox, bird, or rodent."
+   }
+  },
+  "species_rev": {
+   "type": "choice",
+   "instructions": "Which kind of animal is in `photo`?",
+   "criteria": {
+    "small_animal": "A smaller animal such as a raccoon, fox, bird, or rodent.",
+    "elk": "An elk.",
+    "deer": "A white-tailed deer or mule deer.",
+    "moose": "A moose, including calves, cows without antlers, and moose that are partly hidden."
+   }
+  },
+  "f_pale_legs": {
+   "type": "noul",
+   "instructions": "Does the animal in `photo` have long legs that look paler than its body?",
+   "criteria": {
+    "true": "The lower legs are long and clearly lighter than the body, like pale stockings.",
+    "false": "The legs are about the same shade as the body, or short, or not visible."
+   }
+  },
+  "f_white_rump": {
+   "type": "noul",
+   "instructions": "Does the animal in `photo` show a white patch on its rump or under its tail?",
+   "criteria": {
+    "true": "A distinct white patch is visible on the rump or the underside of the tail.",
+    "false": "The rump and tail are the same shade as the body, or not visible."
+   }
+  },
+  "f_hump": {
+   "type": "noul",
+   "instructions": "Does the animal in `photo` have a large, heavy body with a raised hump at the shoulders?",
+   "criteria": {
+    "true": "The body is bulky and the back rises to a hump above the front legs.",
+    "false": "The body is slim, or the back is level, or the body is not visible."
+   }
+  },
+  "f_head_visible": {
+   "type": "noul",
+   "instructions": "Is the head of the animal in `photo` visible?",
+   "criteria": {
+    "true": "Most of the head (face, ears or muzzle) can be seen.",
+    "false": "The head is hidden behind something, turned away, or out of the frame."
+   }
+  },
+  "f_long_muzzle": {
+   "type": "noul",
+   "instructions": "Does the animal in `photo` have a long, broad muzzle that overhangs its mouth?",
+   "criteria": {
+    "true": "The face ends in a long, heavy, drooping nose.",
+    "false": "The face is narrow and pointed, or the muzzle is not visible."
+   }
+  },
+  "where": {
+   "type": "box",
+   "instructions": "the animal in `photo`"
+  }
+ },
+ "C_enhanced": {
+  "animal": {
+   "type": "noul",
+   "instructions": "Is there a real, living animal in `photo`?",
+   "criteria": {
+    "true": "A real animal of any kind (mammal, bird, fish, reptile, insect, ...) is visible in the photo.",
+    "false": "The photo shows only people, objects, or scenery, or shows an animal only as a drawing, cartoon, toy, statue, or other depiction."
+   }
+  },
+  "species": {
+   "type": "choice",
+   "instructions": "Which kind of animal is in `photo`?",
+   "criteria": {
+    "moose": "A moose, including calves, cows without antlers, and moose that are partly hidden.",
+    "deer": "A white-tailed deer or mule deer.",
+    "elk": "An elk.",
+    "small_animal": "A smaller animal such as a raccoon, fox, bird, or rodent."
+   }
+  },
+  "species_rev": {
+   "type": "choice",
+   "instructions": "Which kind of animal is in `photo`?",
+   "criteria": {
+    "small_animal": "A smaller animal such as a raccoon, fox, bird, or rodent.",
+    "elk": "An elk.",
+    "deer": "A white-tailed deer or mule deer.",
+    "moose": "A moose, including calves, cows without antlers, and moose that are partly hidden."
+   }
+  },
+  "f_pale_legs": {
+   "type": "noul",
+   "instructions": "Does the animal in `photo` have long legs that look paler than its body?",
+   "criteria": {
+    "true": "The lower legs are long and clearly lighter than the body, like pale stockings.",
+    "false": "The legs are about the same shade as the body, or short, or not visible."
+   }
+  },
+  "f_white_rump": {
+   "type": "noul",
+   "instructions": "Does the animal in `photo` show a white patch on its rump or under its tail?",
+   "criteria": {
+    "true": "A distinct white patch is visible on the rump or the underside of the tail.",
+    "false": "The rump and tail are the same shade as the body, or not visible."
+   }
+  },
+  "f_hump": {
+   "type": "noul",
+   "instructions": "Does the animal in `photo` have a large, heavy body with a raised hump at the shoulders?",
+   "criteria": {
+    "true": "The body is bulky and the back rises to a hump above the front legs.",
+    "false": "The body is slim, or the back is level, or the body is not visible."
+   }
+  },
+  "f_head_visible": {
+   "type": "noul",
+   "instructions": "Is the head of the animal in `photo` visible?",
+   "criteria": {
+    "true": "Most of the head (face, ears or muzzle) can be seen.",
+    "false": "The head is hidden behind something, turned away, or out of the frame."
+   }
+  },
+  "f_long_muzzle": {
+   "type": "noul",
+   "instructions": "Does the animal in `photo` have a long, broad muzzle that overhangs its mouth?",
+   "criteria": {
+    "true": "The face ends in a long, heavy, drooping nose.",
+    "false": "The face is narrow and pointed, or the muzzle is not visible."
+   }
+  },
+  "where": {
+   "type": "box",
+   "instructions": "the animal in `photo`"
+  }
+ },
+ "E_nb2": {
+  "animal": {
+   "type": "noul",
+   "instructions": "Is there a real, living animal in `photo`?",
+   "criteria": {
+    "true": "A real animal of any kind (mammal, bird, fish, reptile, insect, ...) is visible in the photo.",
+    "false": "The photo shows only people, objects, or scenery, or shows an animal only as a drawing, cartoon, toy, statue, or other depiction."
+   }
+  },
+  "animal_self": {
+   "type": "noul",
+   "instructions": "Is there a real, living animal in `photo` itself?",
+   "criteria": {
+    "true": "A real animal is visible in `photo`, even if only partly.",
+    "false": "`photo` shows no animal, even if an animal is visible in `earlier` or `later`; people and empty scenery don't count."
+   }
+  },
+  "species": {
+   "type": "choice",
+   "instructions": "Which kind of animal is in `photo`?",
+   "criteria": {
+    "moose": "A moose, including calves, cows without antlers, and moose that are partly hidden.",
+    "deer": "A white-tailed deer or mule deer.",
+    "elk": "An elk.",
+    "small_animal": "A smaller animal such as a raccoon, fox, bird, or rodent."
+   }
+  },
+  "species_rev": {
+   "type": "choice",
+   "instructions": "Which kind of animal is in `photo`?",
+   "criteria": {
+    "small_animal": "A smaller animal such as a raccoon, fox, bird, or rodent.",
+    "elk": "An elk.",
+    "deer": "A white-tailed deer or mule deer.",
+    "moose": "A moose, including calves, cows without antlers, and moose that are partly hidden."
+   }
+  },
+  "species_seq": {
+   "type": "choice",
+   "instructions": "Which kind of animal is in `photo`? `earlier` and `later` are photos of the same spot taken seconds before and after it.",
+   "criteria": {
+    "moose": "A moose, including calves, cows without antlers, and moose that are partly hidden.",
+    "deer": "A white-tailed deer or mule deer.",
+    "elk": "An elk.",
+    "small_animal": "A smaller animal such as a raccoon, fox, bird, or rodent."
+   }
+  },
+  "f_pale_legs": {
+   "type": "noul",
+   "instructions": "Does the animal in `photo` have long legs that look paler than its body?",
+   "criteria": {
+    "true": "The lower legs are long and clearly lighter than the body, like pale stockings.",
+    "false": "The legs are about the same shade as the body, or short, or not visible."
+   }
+  },
+  "f_white_rump": {
+   "type": "noul",
+   "instructions": "Does the animal in `photo` show a white patch on its rump or under its tail?",
+   "criteria": {
+    "true": "A distinct white patch is visible on the rump or the underside of the tail.",
+    "false": "The rump and tail are the same shade as the body, or not visible."
+   }
+  },
+  "f_hump": {
+   "type": "noul",
+   "instructions": "Does the animal in `photo` have a large, heavy body with a raised hump at the shoulders?",
+   "criteria": {
+    "true": "The body is bulky and the back rises to a hump above the front legs.",
+    "false": "The body is slim, or the back is level, or the body is not visible."
+   }
+  },
+  "f_head_visible": {
+   "type": "noul",
+   "instructions": "Is the head of the animal in `photo` visible?",
+   "criteria": {
+    "true": "Most of the head (face, ears or muzzle) can be seen.",
+    "false": "The head is hidden behind something, turned away, or out of the frame."
+   }
+  },
+  "f_long_muzzle": {
+   "type": "noul",
+   "instructions": "Does the animal in `photo` have a long, broad muzzle that overhangs its mouth?",
+   "criteria": {
+    "true": "The face ends in a long, heavy, drooping nose.",
+    "false": "The face is narrow and pointed, or the muzzle is not visible."
+   }
+  }
+ },
+ "F_zoom": {
+  "species": {
+   "type": "choice",
+   "instructions": "Which kind of animal is in `photo`?",
+   "criteria": {
+    "moose": "A moose, including calves, cows without antlers, and moose that are partly hidden.",
+    "deer": "A white-tailed deer or mule deer.",
+    "elk": "An elk.",
+    "small_animal": "A smaller animal such as a raccoon, fox, bird, or rodent."
+   }
+  },
+  "species_close": {
+   "type": "choice",
+   "instructions": "Which kind of animal is in `closeup`?",
+   "criteria": {
+    "moose": "A moose, including calves, cows without antlers, and moose that are partly hidden.",
+    "deer": "A white-tailed deer or mule deer.",
+    "elk": "An elk.",
+    "small_animal": "A smaller animal such as a raccoon, fox, bird, or rodent."
+   }
+  },
+  "species_close_rev": {
+   "type": "choice",
+   "instructions": "Which kind of animal is in `closeup`?",
+   "criteria": {
+    "small_animal": "A smaller animal such as a raccoon, fox, bird, or rodent.",
+    "elk": "An elk.",
+    "deer": "A white-tailed deer or mule deer.",
+    "moose": "A moose, including calves, cows without antlers, and moose that are partly hidden."
+   }
+  }
+ },
+ "D_nb1": {
+  "animal": {
+   "type": "noul",
+   "instructions": "Is there a real, living animal in `photo`?",
+   "criteria": {
+    "true": "A real animal of any kind (mammal, bird, fish, reptile, insect, ...) is visible in the photo.",
+    "false": "The photo shows only people, objects, or scenery, or shows an animal only as a drawing, cartoon, toy, statue, or other depiction."
+   }
+  },
+  "species": {
+   "type": "choice",
+   "instructions": "Which kind of animal is in `photo`?",
+   "criteria": {
+    "moose": "A moose, including calves, cows without antlers, and moose that are partly hidden.",
+    "deer": "A white-tailed deer or mule deer.",
+    "elk": "An elk.",
+    "small_animal": "A smaller animal such as a raccoon, fox, bird, or rodent."
+   }
+  },
+  "species_rev": {
+   "type": "choice",
+   "instructions": "Which kind of animal is in `photo`?",
+   "criteria": {
+    "small_animal": "A smaller animal such as a raccoon, fox, bird, or rodent.",
+    "elk": "An elk.",
+    "deer": "A white-tailed deer or mule deer.",
+    "moose": "A moose, including calves, cows without antlers, and moose that are partly hidden."
+   }
+  },
+  "species_seq": {
+   "type": "choice",
+   "instructions": "Which kind of animal is in `photo`? `earlier` and `later` are photos of the same spot taken seconds before and after it.",
+   "criteria": {
+    "moose": "A moose, including calves, cows without antlers, and moose that are partly hidden.",
+    "deer": "A white-tailed deer or mule deer.",
+    "elk": "An elk.",
+    "small_animal": "A smaller animal such as a raccoon, fox, bird, or rodent."
+   }
+  }
+ }
+}

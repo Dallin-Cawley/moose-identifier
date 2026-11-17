@@ -1,0 +1,233 @@
+photo,expected,note
+STC_0588.JPG,animal/moose,night; cow moose side-on
+STC_0823.JPG,animal/moose,night; moose broadside
+STC_1472.JPG,animal/moose,night; bull with antlers
+STC_1654.JPG,animal/moose,dawn fog; dark moose
+STC_3308.JPG,animal/moose,night; moose at tree
+STC_4545.JPG,animal/moose,night; calf/cow broadside
+STC_4980.JPG,animal/moose,night; cow moose
+STC_0396.JPG,animal/moose,hard: night; dark moose half behind tree head down
+STC_2003.JPG,animal/moose,hard: night; only hindquarters at frame edge
+STC_0405.JPG,animal/not_moose,night; deer
+STC_1962.JPG,animal/not_moose,night; deer
+STC_4311.JPG,animal/not_moose,confusion: night; antlered buck deer
+STC_4243.JPG,animal/not_moose,day; deer partly behind tree
+STC_3150.JPG,animal/not_moose,hard: night; deer mostly behind tree
+STC_1638.JPG,animal/not_moose,night; two raccoons on tree
+STC_1949.JPG,animal/not_moose,hard: night; motion-blurred bird
+STC_0012.JPG,no_animal,confusion: day; hunter in orange
+STC_2207.JPG,no_animal,confusion: day; person in long coat
+STC_1901.JPG,no_animal,confusion: dawn IR; two people
+STC_4954.JPG,no_animal,confusion: night; person with headlamp
+STC_0428.JPG,no_animal,day; empty
+STC_4171.JPG,no_animal,night; empty
+STC_4337.JPG,no_animal,fog; empty
+STC_1674.JPG,no_animal,fog; empty
+STC_0023.JPG,no_animal,people or empty
+STC_0079.JPG,no_animal,people or empty
+STC_0099.JPG,no_animal,people or empty
+STC_0212.JPG,no_animal,people or empty
+STC_0217.JPG,no_animal,people or empty
+STC_0284.JPG,no_animal,empty; gun barrel at corner
+STC_0421.JPG,no_animal,people or empty
+STC_0651.JPG,animal/moose,moose
+STC_0687.JPG,animal/moose,moose
+STC_0760.JPG,animal/moose,moose
+STC_0768.JPG,animal/moose,moose
+STC_0830.JPG,animal/moose,moose
+STC_0867.JPG,animal/moose,moose
+STC_0934.JPG,animal/moose,moose
+STC_0981.JPG,animal/moose,moose
+STC_1003.JPG,animal/moose,moose
+STC_1028.JPG,animal/moose,moose
+STC_1085.JPG,animal/moose,moose
+STC_1185.JPG,animal/moose,moose
+STC_1197.JPG,animal/moose,moose
+STC_1258.JPG,animal/moose,moose
+STC_1697.JPG,no_animal,confusion: hunter with pack and gear
+STC_1760.JPG,no_animal,people or empty
+STC_1869.JPG,no_animal,people or empty
+STC_1880.JPG,no_animal,people or empty
+STC_1918.JPG,no_animal,people or empty
+STC_2011.JPG,no_animal,night; empty (no eyeshine at full resolution)
+STC_2105.JPG,no_animal,people or empty
+STC_2109.JPG,no_animal,people or empty
+STC_2169.JPG,no_animal,people or empty
+STC_2257.JPG,no_animal,people or empty
+STC_2411.JPG,no_animal,people or empty
+STC_2414.JPG,no_animal,people or empty
+STC_2452.JPG,no_animal,people or empty
+STC_2470.JPG,no_animal,people or empty
+STC_2581.JPG,no_animal,people or empty
+STC_2592.JPG,no_animal,people or empty
+STC_2638.JPG,no_animal,people or empty
+STC_2681.JPG,no_animal,people or empty
+STC_2857.JPG,no_animal,people or empty
+STC_2920.JPG,no_animal,people or empty
+STC_2996.JPG,no_animal,people or empty
+STC_3055.JPG,no_animal,people or empty
+STC_3098.JPG,animal/not_moose,hard: night; deer half hidden in brush
+STC_3161.JPG,ambiguous,eyeshine only behind tree; species not identifiable (relabelled from no_animal after review)
+STC_3337.JPG,animal/moose,moose
+STC_3345.JPG,animal/moose,moose
+STC_3350.JPG,animal/moose,moose
+STC_3378.JPG,animal/moose,moose
+STC_3379.JPG,animal/moose,moose
+STC_3530.JPG,animal/moose,moose
+STC_3535.JPG,animal/moose,moose
+STC_3548.JPG,animal/moose,moose
+STC_3576.JPG,animal/moose,moose
+STC_3609.JPG,animal/moose,moose
+STC_3641.JPG,animal/moose,moose
+STC_3712.JPG,animal/moose,moose
+STC_3786.JPG,animal/moose,moose
+STC_3848.JPG,animal/moose,moose
+STC_3853.JPG,animal/moose,moose
+STC_3859.JPG,animal/moose,moose
+STC_3884.JPG,animal/moose,moose
+STC_3953.JPG,animal/moose,moose
+STC_3958.JPG,animal/moose,moose
+STC_4031.JPG,ambiguous,dark animal at frame edge; species not identifiable
+STC_4033.JPG,ambiguous,dark animal at frame edge; species not identifiable
+STC_4057.JPG,no_animal,people or empty
+STC_4119.JPG,no_animal,people or empty
+STC_4125.JPG,no_animal,people or empty
+STC_4130.JPG,no_animal,people or empty
+STC_4131.JPG,no_animal,people or empty
+STC_4193.JPG,no_animal,people or empty
+STC_4221.JPG,no_animal,people or empty
+STC_4226.JPG,no_animal,people or empty
+STC_4259.JPG,ambiguous,eyeshine only behind tree; species not identifiable (relabelled from no_animal after review)
+STC_4303.JPG,animal/not_moose,hard: night; deer face and eyeshine behind tree (relabelled from no_animal after review)
+STC_4314.JPG,animal/not_moose,confusion: night; antlered buck
+STC_4319.JPG,animal/not_moose,confusion: night; antlered buck
+STC_4356.JPG,no_animal,people or empty
+STC_4396.JPG,animal/moose,moose
+STC_4399.JPG,animal/moose,moose
+STC_4411.JPG,animal/moose,moose
+STC_4522.JPG,animal/moose,moose
+STC_4586.JPG,animal/moose,moose
+STC_4604.JPG,animal/moose,moose
+STC_4607.JPG,animal/moose,moose
+STC_4660.JPG,animal/moose,moose
+STC_4678.JPG,animal/moose,moose
+STC_4685.JPG,animal/moose,moose
+STC_4704.JPG,animal/moose,moose
+STC_4739.JPG,animal/moose,moose
+STC_4810.JPG,animal/moose,moose
+STC_4836.JPG,animal/moose,moose
+STC_4853.JPG,animal/moose,moose
+STC_4921.JPG,no_animal,people or empty
+STC_4927.JPG,no_animal,people or empty
+STC_5020.JPG,animal/moose,moose
+STC_5045.JPG,animal/moose,moose
+STC_5052.JPG,animal/moose,moose
+STC_5163.JPG,no_animal,camera knocked; close-up of trunk
+STC_0403.JPG,animal/not_moose,"hard: night; deer head only, right of tree"
+STC_3099.JPG,animal/not_moose,hard: night; deer mostly hidden
+STC_4239.JPG,animal/not_moose,hard: day; deer behind tree
+STC_4306.JPG,animal/not_moose,hard: night; buck face at tree
+STC_4327.JPG,animal/not_moose,hard: night; buck partly out of frame at left edge
+STC_3130.JPG,animal/not_moose,hard: night; deer face and eyeshine left of tree
+STC_0404.JPG,animal/not_moose,night; deer
+STC_0406.JPG,animal/not_moose,night; deer
+STC_0407.JPG,animal/not_moose,night; deer
+STC_0408.JPG,animal/not_moose,night; deer
+STC_0409.JPG,animal/not_moose,night; deer
+STC_1634.JPG,animal/not_moose,night; raccoon
+STC_1636.JPG,animal/not_moose,night; raccoon
+STC_1637.JPG,animal/not_moose,night; raccoon
+STC_1639.JPG,animal/not_moose,night; raccoon
+STC_1640.JPG,animal/not_moose,night; raccoon
+STC_1641.JPG,animal/not_moose,night; raccoon
+STC_1642.JPG,animal/not_moose,night; raccoon
+STC_1940.JPG,animal/not_moose,night; motion-blurred bird
+STC_1960.JPG,animal/not_moose,night; deer
+STC_1961.JPG,animal/not_moose,night; deer
+STC_1963.JPG,animal/not_moose,night; deer
+STC_1964.JPG,animal/not_moose,night; deer
+STC_1965.JPG,animal/not_moose,night; deer
+STC_1966.JPG,animal/not_moose,night; deer
+STC_3096.JPG,animal/not_moose,night; deer
+STC_3097.JPG,animal/not_moose,night; deer
+STC_4240.JPG,animal/not_moose,day; deer
+STC_4241.JPG,animal/not_moose,day; deer
+STC_4242.JPG,animal/not_moose,day; deer
+STC_4244.JPG,animal/not_moose,day; deer
+STC_4245.JPG,animal/not_moose,day; deer
+STC_4246.JPG,animal/not_moose,day; deer
+STC_4247.JPG,animal/not_moose,day; deer
+STC_4266.JPG,animal/not_moose,night; deer
+STC_4268.JPG,animal/not_moose,night; deer
+STC_4270.JPG,animal/not_moose,night; antlered buck
+STC_4272.JPG,animal/not_moose,night; deer
+STC_4274.JPG,animal/not_moose,night; antlered buck
+STC_4308.JPG,animal/not_moose,night; antlered buck
+STC_4310.JPG,animal/not_moose,night; antlered buck
+STC_4313.JPG,animal/not_moose,night; antlered buck
+STC_4316.JPG,animal/not_moose,night; antlered buck
+STC_4318.JPG,animal/not_moose,night; antlered buck
+STC_4321.JPG,animal/not_moose,night; antlered buck
+STC_4323.JPG,animal/not_moose,night; antlered buck
+STC_4325.JPG,animal/not_moose,night; antlered buck
+STC_3135.JPG,animal/not_moose,night; deer
+STC_3140.JPG,animal/not_moose,night; deer
+STC_3145.JPG,animal/not_moose,night; deer
+STC_2016.JPG,animal/moose,hard: night; moose calf mostly behind tree
+STC_0392.JPG,animal/moose,"hard: night; bull head and antlers only, at left edge"
+STC_0395.JPG,animal/moose,"hard: night; moose from behind, pale legs"
+STC_0397.JPG,animal/moose,"hard: night; dark moose rear, half hidden"
+STC_1995.JPG,animal/moose,"hard: night; dark moose in shadow, eyeshine"
+STC_1996.JPG,animal/moose,hard: night; dark moose in shadow
+STC_2017.JPG,animal/moose,night; moose
+STC_2018.JPG,animal/moose,night; moose
+STC_2019.JPG,animal/moose,night; moose
+STC_2020.JPG,animal/moose,night; moose
+STC_2021.JPG,animal/moose,night; moose
+STC_2022.JPG,animal/moose,night; moose
+STC_2023.JPG,animal/moose,night; moose
+STC_2024.JPG,animal/moose,night; moose
+STC_2025.JPG,animal/moose,night; moose
+STC_2026.JPG,animal/moose,night; moose
+STC_2027.JPG,animal/moose,night; moose
+STC_2028.JPG,animal/moose,night; moose
+STC_2029.JPG,animal/moose,night; moose
+STC_0393.JPG,animal/moose,night; moose
+STC_0394.JPG,animal/moose,night; moose
+STC_1997.JPG,animal/moose,night; moose
+STC_1998.JPG,animal/moose,night; moose
+STC_1999.JPG,animal/moose,night; moose
+STC_2000.JPG,animal/moose,night; moose
+STC_2001.JPG,animal/moose,night; moose
+STC_2002.JPG,animal/moose,night; moose
+STC_0401.JPG,no_animal,hard: night; empty frame inside an animal event
+STC_0402.JPG,no_animal,hard: night; empty frame inside an animal event
+STC_1941.JPG,no_animal,hard: night; empty frame inside an animal event
+STC_1945.JPG,no_animal,hard: night; empty frame inside an animal event
+STC_1950.JPG,no_animal,hard: night; empty frame inside an animal event
+STC_1955.JPG,no_animal,hard: night; empty frame inside an animal event
+STC_1958.JPG,no_animal,hard: night; empty frame inside an animal event
+STC_1959.JPG,ambiguous,faint shape beside tree at night; can't tell if an animal (relabelled after review)
+STC_3100.JPG,no_animal,hard: night; empty frame inside an animal event
+STC_3102.JPG,no_animal,hard: night; empty frame inside an animal event
+STC_4276.JPG,no_animal,hard: night; empty frame inside an animal event
+STC_4284.JPG,no_animal,hard: night; empty frame inside an animal event
+STC_4292.JPG,no_animal,hard: night; empty frame inside an animal event
+STC_2012.JPG,no_animal,hard: night; empty frame inside an animal event
+STC_2013.JPG,no_animal,hard: night; empty frame inside an animal event
+STC_1985.JPG,no_animal,hard: night; empty frame inside an animal event
+STC_1990.JPG,no_animal,hard: night; empty frame inside an animal event
+STC_4369.JPG,no_animal,hard: night; empty frame inside an animal event
+STC_4379.JPG,no_animal,hard: night; empty frame inside an animal event
+STC_4389.JPG,no_animal,hard: night; empty frame inside an animal event
+STC_4905.JPG,no_animal,hard: night; empty frame inside an animal event
+STC_4913.JPG,no_animal,hard: night; empty frame inside an animal event
+STC_0398.JPG,no_animal,hard: night; empty frame inside an animal event
+STC_0400.JPG,no_animal,hard: night; empty frame inside an animal event
+STC_2006.JPG,no_animal,hard: night; empty frame inside an animal event
+STC_2009.JPG,no_animal,hard: night; empty frame inside an animal event
+STC_3105.JPG,no_animal,hard: night; empty frame inside an animal event
+STC_3120.JPG,ambiguous,faint shape beside tree at night; can't tell if an animal (relabelled after review)
+STC_3156.JPG,no_animal,hard: night; empty frame inside an animal event
+STC_3187.JPG,no_animal,hard: night; empty frame inside an animal event
+STC_4915.JPG,ambiguous,large dark animal at bottom-left edge; species not identifiable
