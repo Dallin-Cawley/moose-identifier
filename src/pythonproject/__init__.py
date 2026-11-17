@@ -19,6 +19,7 @@ from .classify import Category, Result
 from .identify import (SMOOTH_NEIGHBOURS, TOKENS_PER_IMAGE, IdentificationStrategy, SinglePhoto,
                        find_neighbours, flag_for_review, smooth)
 from .events import STRATEGIES, Event, EventStrategy, read_timestamp
+from .export import is_copy_of, resolve_links, zip_dir
 from .questions import PRICE_PER_TOKEN
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
@@ -112,17 +113,20 @@ def group_into_events(
 
 
 def link_into(out_dir: Path, event: Event, result: Result) -> Path:
-    """Symlink the original into out_dir/<event>/<category>/, avoiding name collisions."""
+    """Symlink the original into out_dir/<event>/<category>/, avoiding name collisions.
+
+    A copy left there by --resolve-links counts as already placed, so re-running doesn't duplicate it.
+    """
     target = result.path.resolve()
     folder = out_dir / event.folder / result.category
     folder.mkdir(parents=True, exist_ok=True)
     link = folder / target.name
-    if link.is_symlink() and link.resolve() == target:
+    if (link.is_symlink() and link.resolve() == target) or is_copy_of(link, target):
         return link
     if link.exists() or link.is_symlink():
         tag = hashlib.sha1(str(target).encode()).hexdigest()[:8]
         link = folder / f"{target.stem}-{tag}{target.suffix}"
-        if link.is_symlink() and link.resolve() == target:
+        if (link.is_symlink() and link.resolve() == target) or is_copy_of(link, target):
             return link
     link.symlink_to(target)
     return link
@@ -218,7 +222,9 @@ def main() -> None:
         description="Group photos into 10-minute events, classify them with Jev, and symlink them "
                     "into <event>/{animal/moose,animal/not_moose,animal/not_moose_check,no_animal,unsure}/ folders.",
     )
-    parser.add_argument("inputs", nargs="+", type=Path, help="image files and/or directories")
+    parser.add_argument("inputs", nargs="*", type=Path,
+                        help="image files and/or directories. May be left out with --resolve-links or "
+                             "--zip to export an existing output directory without calling the API")
     parser.add_argument("-o", "--out", type=Path, default=Path("sorted"),
                         help="output directory (default: ./sorted)")
     parser.add_argument("-e", "--events", choices=sorted(STRATEGIES), default="static",
@@ -241,9 +247,32 @@ def main() -> None:
                            help=f"file containing the TypeSafe API key. Without either option the key "
                                 f"comes from {DEFAULT_KEY_FILE}, then $TYPESAFE_API_KEY, then a "
                                 "hidden prompt if running in a terminal")
+    parser.add_argument("--resolve-links", action="store_true",
+                        help="after sorting, replace each symlink in the output with a copy of the "
+                             "original photo, so the folder can be shared (originals are untouched)")
+    parser.add_argument("--zip", action="store_true",
+                        help="after resolving links, zip the output directory (implies --resolve-links)")
+    parser.add_argument("--zip-path", type=Path, metavar="PATH",
+                        help="where to write the zip (implies --zip; default: <out>.zip next to the "
+                             "output directory)")
     args = parser.parse_args()
 
     out_dir = args.out.resolve()
+    zip_path = (args.zip_path.resolve() if args.zip_path
+                else out_dir.with_name(out_dir.name + ".zip") if args.zip else None)
+    export = args.resolve_links or zip_path is not None
+    if export and args.dry_run:
+        parser.error("--resolve-links/--zip need an output directory; they can't be used with --dry-run")
+    if zip_path is not None and zip_path == out_dir:
+        parser.error("--zip path is the output directory itself")
+
+    if not args.inputs:
+        if not export:
+            parser.error("the following arguments are required: inputs")
+        if not out_dir.is_dir():
+            parser.error(f"output directory not found: {out_dir}")
+        sys.exit(export_output(out_dir, zip_path))
+
     images = find_images(args.inputs, exclude=out_dir)
     if not images:
         parser.error("no .jpg/.jpeg/.png images found")
@@ -269,4 +298,23 @@ def main() -> None:
         out_dir.mkdir(parents=True, exist_ok=True)
     rc = asyncio.run(run(photos, strategy, identify, out_dir, args.concurrency, args.dry_run, api_key,
                          smoothing=not args.no_smooth))
+    if export:
+        rc = max(rc, export_output(out_dir, zip_path))
     sys.exit(1 if missing else rc)
+
+
+def export_output(out_dir: Path, zip_path: Path | None) -> int:
+    """--resolve-links / --zip: copy originals in place of the symlinks, then optionally zip."""
+    resolved, broken = resolve_links(out_dir)
+    print(f"resolved {resolved} link(s) into copies of the originals in {out_dir}", file=sys.stderr)
+    for link in broken:
+        print(f"broken link, original missing: {link}", file=sys.stderr)
+    if broken:
+        print(f"{len(broken)} broken link(s) left in place" + ("; not zipping" if zip_path else ""),
+              file=sys.stderr)
+        return 1
+    if zip_path is not None:
+        n = zip_dir(out_dir, zip_path)
+        size_mb = zip_path.stat().st_size / 1e6
+        print(f"zipped {n} file(s) into {zip_path} ({size_mb:,.1f} MB)", file=sys.stderr)
+    return 0

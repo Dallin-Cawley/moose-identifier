@@ -77,6 +77,9 @@ uv run moose-sort path/to/photos --dry-run
 | `--estimate`            | off             | print the estimated cost and exit                                  |
 | `-j, --concurrency N`   | `8`             | parallel requests                                                  |
 | `-n, --dry-run`         | off             | classify and print only                                            |
+| `--resolve-links`       | off             | replace the output's symlinks with copies of the originals         |
+| `--zip`                 | off             | resolve links, then zip the output folder (to `<out>.zip`)         |
+| `--zip-path PATH`       | `<out>.zip`     | where to write the zip (implies `--zip`)                           |
 | `-k, --api-key KEY`     | —               | TypeSafe API key, or `-` to read it from stdin                     |
 | `--api-key-file PATH`   | —               | file containing the TypeSafe API key (see [API key](#api-key))     |
 
@@ -103,8 +106,35 @@ sorted/
 └── ...
 ```
 
-The photos themselves are never moved or copied, only symlinked. Re-running on the same photos reuses
+By default the photos are never moved or copied, only symlinked. Re-running on the same photos reuses
 existing links.
+
+### Sharing the results
+
+Symlinks only work on the machine that made them. To share the sorted folder, turn them into real copies
+and optionally zip it:
+
+```sh
+# Sort and export in one go
+uv run moose-sort path/to/photos -o sorted --zip                 # writes sorted/ with copies + sorted.zip
+
+# Export an existing output folder; no inputs, no API calls, no key needed
+uv run moose-sort -o sorted --resolve-links                      # copies only
+uv run moose-sort -o sorted --zip-path ~/share/moose-results.zip # copies + zip at a chosen path
+```
+
+- **`--resolve-links`** replaces each symlink with a copy of the original photo, at the same path and with
+  the same name and timestamps. The originals are never moved or changed. It's safe to run again, and
+  re-sorting into a resolved folder doesn't duplicate photos.
+- **`--zip`** resolves links first, then writes `<out>.zip` next to the output folder, with the folder as
+  its top-level entry. Photos are stored uncompressed (JPEGs don't shrink further, and it's much faster);
+  `results.jsonl` and `events.csv` are compressed.
+- If an original has gone missing, its link is reported and left in place, no zip is written, and the
+  exit code is 1.
+- **Disk space:** copies take as much space as the originals, and so does the zip (about 7 GB each for
+  a 5,000-photo card).
+- **Privacy:** the copies are byte-for-byte originals, so they keep the camera's EXIF data, including GPS
+  if the camera records it. `results.jsonl` contains each original's absolute path on your machine.
 
 ## Cost estimation
 

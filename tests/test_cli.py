@@ -299,3 +299,92 @@ def test_no_prompt_when_not_interactive(scene, tmp_path, fake_api, no_default_ke
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))      # StringIO.isatty() is False
     assert run_cli(scene, "-o", tmp_path / "out") == 2
     assert fake_api.requests == []
+
+
+# --- resolving links and zipping the output -------------------------------------------------------
+
+def files_in(out):
+    """Regular files (not symlinks) under out, relative paths."""
+    return sorted(str(p.relative_to(out)) for p in out.rglob("*") if p.is_file() and not p.is_symlink())
+
+
+def test_resolve_links_copies_originals_in_place(scene, tmp_path, key_file):
+    out = tmp_path / "out"
+    assert run_cli(scene, "-o", out, "--api-key-file", key_file, "--resolve-links") == 0
+    assert tree(out) == []                                    # no symlinks left
+    moose = out / "event_0000_2024-10-30_162804/animal/moose/moose1.jpg"
+    assert moose.read_bytes() == (scene / "moose1.jpg").read_bytes()
+    assert (scene / "moose1.jpg").is_file() and not (scene / "moose1.jpg").is_symlink()  # original untouched
+    assert {"results.jsonl", "events.csv"} <= set(files_in(out))
+
+
+def test_resolve_existing_output_without_inputs_sends_nothing(scene, tmp_path, key_file, fake_api):
+    out = tmp_path / "out"
+    run_cli(scene, "-o", out, "--api-key-file", key_file)
+    sent = len(fake_api.requests)
+    links = tree(out)
+    assert run_cli("-o", out, "--resolve-links") == 0         # no inputs, no key needed
+    assert len(fake_api.requests) == sent
+    assert tree(out) == [] and set(links) <= set(files_in(out))
+    assert run_cli("-o", out, "--resolve-links") == 0         # running again is a no-op
+
+
+def test_rerun_after_resolving_does_not_duplicate(scene, tmp_path, key_file):
+    out = tmp_path / "out"
+    run_cli(scene, "-o", out, "--api-key-file", key_file, "--resolve-links")
+    before = files_in(out)
+    run_cli(scene, "-o", out, "--api-key-file", key_file)
+    assert tree(out) == [] and files_in(out) == before        # no STC-<hash> duplicates or new links
+
+
+def test_zip_contains_resolved_tree(scene, tmp_path, key_file):
+    import zipfile
+    out = tmp_path / "out"
+    assert run_cli(scene, "-o", out, "--api-key-file", key_file, "--zip") == 0
+    zpath = tmp_path / "out.zip"
+    with zipfile.ZipFile(zpath) as zf:
+        names = sorted(zf.namelist())
+        assert "out/results.jsonl" in names and "out/events.csv" in names
+        assert "out/event_0000_2024-10-30_162804/animal/moose/moose1.jpg" in names
+        data = zf.read("out/event_0000_2024-10-30_162804/animal/moose/moose1.jpg")
+    assert data == (scene / "moose1.jpg").read_bytes()
+    assert len(names) == len(files_in(out))
+    assert not zpath.with_name("out.zip.partial").exists()
+
+
+def test_zip_path_inside_output_is_not_zipped_into_itself(scene, tmp_path, key_file):
+    import zipfile
+    out = tmp_path / "out"
+    run_cli(scene, "-o", out, "--api-key-file", key_file)
+    zpath = out / "share.zip"
+    assert run_cli("-o", out, "--zip-path", zpath) == 0
+    assert run_cli("-o", out, "--zip-path", zpath) == 0       # again, with the old zip present
+    with zipfile.ZipFile(zpath) as zf:
+        assert not any(n.endswith(".zip") or n.endswith(".partial") for n in zf.namelist())
+
+
+def test_broken_link_is_reported_and_not_zipped(scene, tmp_path, key_file):
+    out = tmp_path / "out"
+    run_cli(scene, "-o", out, "--api-key-file", key_file)
+    (scene / "deer.jpg").unlink()
+    assert run_cli("-o", out, "--zip") == 1
+    assert not (tmp_path / "out.zip").exists()
+    assert tree(out) == ["event_0000_2024-10-30_162804/animal/not_moose_check/deer.jpg"]
+
+
+def test_export_option_errors(scene, tmp_path, key_file, fake_api):
+    out = tmp_path / "out"
+    assert run_cli("-o", out) == 2                            # no inputs and nothing to export
+    assert run_cli("-o", tmp_path / "missing", "--resolve-links") == 2
+    assert run_cli(scene, "-o", out, "-n", "--zip", "--api-key-file", key_file) == 2
+    assert fake_api.requests == []
+
+
+def test_zip_dir_refuses_symlinks(tmp_path):
+    from pythonproject.export import zip_dir
+    d = tmp_path / "d"
+    d.mkdir()
+    (tmp_path / "real.jpg").write_bytes(b"x")
+    (d / "link.jpg").symlink_to(tmp_path / "real.jpg")
+    with pytest.raises(ValueError, match="symlink"):
+        zip_dir(d, tmp_path / "d.zip")
