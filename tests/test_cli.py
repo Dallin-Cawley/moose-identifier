@@ -219,3 +219,83 @@ def test_placeholder_key_counts_as_no_key(scene, tmp_path, monkeypatch):
     assert run_cli(scene, "-o", tmp_path / "out", "--api-key-file", key) == 2   # usage error, nothing sent
     monkeypatch.setenv("TYPESAFE_API_KEY", "from-env")
     assert pythonproject.load_api_key(key) == "from-env"
+
+
+# --- choosing the API key -------------------------------------------------------------------------
+
+@pytest.fixture
+def sent_key(monkeypatch):
+    """Records the api_key the CLI hands to the SDK client (the fake API ignores it)."""
+    import typesafe_sdk
+    seen = {}
+    patched = typesafe_sdk.AsyncTypeSafeClient.__init__
+    def spy(self, **kw):
+        seen["key"] = kw.get("api_key")
+        patched(self, **kw)
+    monkeypatch.setattr(typesafe_sdk.AsyncTypeSafeClient, "__init__", spy)
+    return seen
+
+
+@pytest.fixture
+def no_default_key(tmp_path, monkeypatch):
+    """No src/api_key and no $TYPESAFE_API_KEY, so only the CLI options can supply a key."""
+    monkeypatch.setattr(pythonproject, "DEFAULT_KEY_FILE", tmp_path / "no_default_key")
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+
+
+def test_api_key_option_is_sent(scene, tmp_path, sent_key, no_default_key):
+    assert run_cli(scene, "-o", tmp_path / "out", "--api-key", " cli-key ") in (0, 1)
+    assert sent_key["key"] == "cli-key"
+
+
+def test_api_key_dash_reads_stdin(scene, tmp_path, sent_key, no_default_key, monkeypatch):
+    import io
+    monkeypatch.setattr(sys, "stdin", io.StringIO("stdin-key\n"))
+    run_cli(scene, "-o", tmp_path / "out", "-k", "-")
+    assert sent_key["key"] == "stdin-key"
+
+
+def test_api_key_option_beats_env_and_default(scene, tmp_path, sent_key, monkeypatch):
+    default = tmp_path / "default_key"
+    default.write_text("default-key\n")
+    monkeypatch.setattr(pythonproject, "DEFAULT_KEY_FILE", default)
+    monkeypatch.setenv("TYPESAFE_API_KEY", "env-key")
+    run_cli(scene, "-o", tmp_path / "out", "--api-key", "cli-key")
+    assert sent_key["key"] == "cli-key"
+
+
+def test_api_key_and_file_are_mutually_exclusive(scene, tmp_path, key_file, fake_api):
+    assert run_cli(scene, "-o", tmp_path / "out", "--api-key", "x", "--api-key-file", key_file) == 2
+    assert fake_api.requests == []
+
+
+def test_empty_api_key_is_usage_error(scene, tmp_path, fake_api, no_default_key):
+    assert run_cli(scene, "-o", tmp_path / "out", "--api-key", "  ") == 2
+    assert fake_api.requests == []
+
+
+def test_explicit_missing_key_file_does_not_fall_back_to_env(scene, tmp_path, fake_api, monkeypatch):
+    monkeypatch.setenv("TYPESAFE_API_KEY", "env-key")
+    assert run_cli(scene, "-o", tmp_path / "out", "--api-key-file", tmp_path / "missing") == 2
+    assert fake_api.requests == []
+
+
+def test_default_file_then_env(scene, tmp_path, sent_key, no_default_key, monkeypatch):
+    monkeypatch.setenv("TYPESAFE_API_KEY", "env-key")
+    run_cli(scene, "-o", tmp_path / "out")
+    assert sent_key["key"] == "env-key"
+
+
+def test_prompts_when_interactive_and_no_key(scene, tmp_path, sent_key, no_default_key, monkeypatch):
+    import getpass
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr(getpass, "getpass", lambda prompt="": "typed-key")
+    run_cli(scene, "-o", tmp_path / "out")
+    assert sent_key["key"] == "typed-key"
+
+
+def test_no_prompt_when_not_interactive(scene, tmp_path, fake_api, no_default_key, monkeypatch):
+    import io
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))      # StringIO.isatty() is False
+    assert run_cli(scene, "-o", tmp_path / "out") == 2
+    assert fake_api.requests == []

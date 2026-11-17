@@ -28,13 +28,26 @@ uv sync                # creates .venv and installs pillow, typesafe-sdk and pyt
 
 ### API key
 
-Create a key at <https://console.typesafe.ai/>, then either:
+Create a key at <https://console.typesafe.ai/>. `moose-sort` looks for it in this order and uses the
+first one it finds:
 
-- replace the placeholder in `src/api_key` with your key, **or**
-- set an environment variable: `export TYPESAFE_API_KEY=...`
+| # | Source                         | Example                                                     |
+|---|--------------------------------|-------------------------------------------------------------|
+| 1 | `-k/--api-key KEY` on the CLI  | `uv run moose-sort photos --api-key ts_...`                 |
+|   | …or `--api-key -` (stdin)      | `pass show typesafe \| uv run moose-sort photos --api-key -` |
+| 2 | `--api-key-file PATH`          | `uv run moose-sort photos --api-key-file ~/.config/typesafe/key` |
+| 3 | `src/api_key`                  | replace the placeholder in the file with your key           |
+| 4 | `TYPESAFE_API_KEY`             | `export TYPESAFE_API_KEY=ts_...`                            |
+| 5 | hidden prompt                  | asked interactively if nothing above is set and you're in a terminal |
 
-The file wins if it holds a real key; a missing, empty or placeholder file (anything starting with `<`)
-falls back to `TYPESAFE_API_KEY`. You can also point at another file with `--api-key-file PATH`.
+- `--api-key` and `--api-key-file` can't be used together.
+- A file given with `--api-key-file` must exist and hold a real key. It's an error otherwise, with no
+  fallback to the environment, so a typo in the path doesn't quietly use a different key.
+- `src/api_key` counts as unset when it's missing, empty, or still holds the placeholder (anything
+  starting with `<`).
+- `--api-key KEY` leaves the key in your shell history and the process list. Prefer `--api-key -`, a
+  key file, or the prompt on shared machines.
+- `--estimate` never needs a key.
 
 > **Don't commit your real key.** After putting it in `src/api_key`, run
 > `git update-index --skip-worktree src/api_key` so git ignores your local change.
@@ -64,7 +77,8 @@ uv run moose-sort path/to/photos --dry-run
 | `--estimate`            | off             | print the estimated cost and exit                                  |
 | `-j, --concurrency N`   | `8`             | parallel requests                                                  |
 | `-n, --dry-run`         | off             | classify and print only                                            |
-| `--api-key-file PATH`   | `src/api_key`   | file containing the TypeSafe API key                               |
+| `-k, --api-key KEY`     | —               | TypeSafe API key, or `-` to read it from stdin                     |
+| `--api-key-file PATH`   | —               | file containing the TypeSafe API key (see [API key](#api-key))     |
 
 Tips:
 

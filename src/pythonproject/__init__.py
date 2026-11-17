@@ -38,6 +38,41 @@ def load_api_key(key_file: Path) -> str | None:
     return os.environ.get("TYPESAFE_API_KEY") or None
 
 
+def resolve_api_key(api_key: str | None, api_key_file: Path | None) -> str:
+    """Pick the key for a CLI run, in this order:
+
+    1. --api-key KEY (or "-" to read one line from stdin, which keeps it out of shell history);
+    2. --api-key-file PATH, which must exist and hold a real key;
+    3. the default src/api_key file, then $TYPESAFE_API_KEY;
+    4. an interactive hidden prompt, if stdin is a terminal.
+
+    Raises ValueError with a user-facing message when no key can be found.
+    """
+    if api_key is not None:
+        key = sys.stdin.readline().strip() if api_key == "-" else api_key.strip()
+        if not key:
+            raise ValueError("--api-key was given but is empty")
+        return key
+    if api_key_file is not None:
+        if not api_key_file.is_file():
+            raise ValueError(f"API key file not found: {api_key_file}")
+        key = api_key_file.read_text().strip()
+        if not key or key.startswith("<"):
+            raise ValueError(f"API key file {api_key_file} is empty or still holds the placeholder")
+        return key
+    key = load_api_key(DEFAULT_KEY_FILE)
+    if key:
+        return key
+    if sys.stdin.isatty():
+        import getpass
+        key = getpass.getpass("TypeSafe API key (input hidden): ").strip()
+        if key:
+            return key
+    raise ValueError(f"no API key: pass --api-key or --api-key-file, put your TypeSafe key in "
+                     f"{DEFAULT_KEY_FILE} (replacing the placeholder), or set TYPESAFE_API_KEY. "
+                     "Create a key at https://console.typesafe.ai/")
+
+
 def find_images(inputs: list[Path], exclude: Path) -> list[Path]:
     found: dict[Path, None] = {}
     for item in inputs:
@@ -198,9 +233,14 @@ def main() -> None:
                         help="parallel requests (default: 8)")
     parser.add_argument("-n", "--dry-run", action="store_true",
                         help="classify and print only; create no links")
-    parser.add_argument("--api-key-file", type=Path, default=DEFAULT_KEY_FILE,
-                        help=f"file containing the TypeSafe API key (default: {DEFAULT_KEY_FILE}); "
-                             "falls back to $TYPESAFE_API_KEY if the file is missing")
+    key_group = parser.add_mutually_exclusive_group()
+    key_group.add_argument("-k", "--api-key", metavar="KEY",
+                           help="TypeSafe API key; use '-' to read it from stdin (keeps it out of "
+                                "shell history and the process list)")
+    key_group.add_argument("--api-key-file", type=Path, metavar="PATH",
+                           help=f"file containing the TypeSafe API key. Without either option the key "
+                                f"comes from {DEFAULT_KEY_FILE}, then $TYPESAFE_API_KEY, then a "
+                                "hidden prompt if running in a terminal")
     args = parser.parse_args()
 
     out_dir = args.out.resolve()
@@ -221,10 +261,10 @@ def main() -> None:
     if args.estimate:
         return
 
-    api_key = load_api_key(args.api_key_file)
-    if not api_key:
-        parser.error(f"no API key: put your TypeSafe key in {args.api_key_file} (replacing the placeholder) "
-                     "or set TYPESAFE_API_KEY. Create a key at https://console.typesafe.ai/")
+    try:
+        api_key = resolve_api_key(args.api_key, args.api_key_file)
+    except ValueError as e:
+        parser.error(str(e))
     if not args.dry_run:
         out_dir.mkdir(parents=True, exist_ok=True)
     rc = asyncio.run(run(photos, strategy, identify, out_dir, args.concurrency, args.dry_run, api_key,
