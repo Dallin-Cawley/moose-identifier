@@ -36,9 +36,10 @@ first one it finds:
 | 1 | `-k/--api-key KEY` on the CLI  | `uv run moose-sort photos --api-key ts_...`                 |
 |   | …or `--api-key -` (stdin)      | `pass show typesafe \| uv run moose-sort photos --api-key -` |
 | 2 | `--api-key-file PATH`          | `uv run moose-sort photos --api-key-file ~/.config/typesafe/key` |
-| 3 | `src/api_key`                  | replace the placeholder in the file with your key           |
-| 4 | `TYPESAFE_API_KEY`             | `export TYPESAFE_API_KEY=ts_...`                            |
-| 5 | hidden prompt                  | asked interactively if nothing above is set and you're in a terminal |
+| 3 | config file                    | `api_key_file = "..."` (or `api_key`) in [the config file](#configuration-file) |
+| 4 | `src/api_key`                  | replace the placeholder in the file with your key           |
+| 5 | `TYPESAFE_API_KEY`             | `export TYPESAFE_API_KEY=ts_...`                            |
+| 6 | hidden prompt                  | asked interactively if nothing above is set and you're in a terminal |
 
 - `--api-key` and `--api-key-file` can't be used together.
 - A file given with `--api-key-file` must exist and hold a real key. It's an error otherwise, with no
@@ -66,20 +67,30 @@ uv run moose-sort path/to/photos -o sorted_rolling --events rolling
 
 # Classify and print only, create no links
 uv run moose-sort path/to/photos --dry-run
+
+# 3. Zip up an existing result to share it: no re-sorting, no API calls, no key needed
+uv run moose-sort --export sorted --zip
 ```
+
+Already sorted and just want a shareable zip? `--export DIR --zip` takes the results folder of an
+earlier run, replaces its symlinks with copies of the original photos, and writes `DIR.zip` next to it.
+Leave out `--zip` to only resolve the links. See [Sharing the results](#sharing-the-results).
 
 | Option                  | Default         | Description                                                        |
 |-------------------------|-----------------|--------------------------------------------------------------------|
 | `inputs`                | (required)      | image files and/or directories (`.jpg`, `.jpeg`, `.png`)           |
+| `-c, --config PATH`     | `./moose-sort.hcl` | HCL config file (see [Configuration file](#configuration-file)) |
+| `--no-config`           | off             | ignore `./moose-sort.hcl` even if it exists                        |
 | `-o, --out DIR`         | `./sorted`      | output directory                                                   |
 | `-e, --events`          | `static`        | `static` (fixed grid from the first photo) or `rolling`            |
-| `--no-smooth`           | off             | don't promote a photo to moose when its neighbouring frame is one  |
+| `--smooth / --no-smooth`| on              | promote a photo to moose when its neighbouring frame is one        |
 | `--estimate`            | off             | print the estimated cost and exit                                  |
 | `-j, --concurrency N`   | `8`             | parallel requests                                                  |
 | `-n, --dry-run`         | off             | classify and print only                                            |
-| `--resolve-links`       | off             | replace the output's symlinks with copies of the originals         |
-| `--zip`                 | off             | resolve links, then zip the output folder (to `<out>.zip`)         |
+| `--[no-]resolve-links`  | off             | replace the output's symlinks with copies of the originals         |
+| `--[no-]zip`            | off             | resolve links, then zip the output folder (to `<out>.zip`)         |
 | `--zip-path PATH`       | `<out>.zip`     | where to write the zip (implies `--zip`)                           |
+| `--export DIR`          | —               | don't sort: resolve an earlier run's results folder, zip with `--zip` |
 | `-k, --api-key KEY`     | —               | TypeSafe API key, or `-` to read it from stdin                     |
 | `--api-key-file PATH`   | —               | file containing the TypeSafe API key (see [API key](#api-key))     |
 
@@ -89,6 +100,66 @@ Tips:
   smoothing only sees neighbours in the same run.
 - **Use a separate output folder per event strategy**; they produce different event folders.
 - Photos without an EXIF capture time are reported and left unsorted (exit code 1).
+
+### Configuration file
+
+Every setting you'd otherwise type each time can live in an [HCL](https://github.com/hashicorp/hcl)
+file. `moose-sort` reads `--config PATH`, or `./moose-sort.hcl` from the current directory if it exists
+(`--no-config` skips it). It prints `config: <path>` when it uses one.
+
+Example `moose-sort.hcl`, with every setting:
+
+```hcl
+# Photos to sort: files and/or folders. Used when none are given on the command line.
+inputs = [
+  "~/trailcam/card-12",
+]
+
+# Where the event folders go.
+output = "sorted"
+
+# "static": fixed 10-minute grid from the first photo; "rolling": each event starts at
+# the first photo that doesn't fit in the previous one.
+events = "static"
+
+# Promote a photo to moose when the frame next to it, in the same event, is a moose.
+smoothing = true
+
+# Parallel requests to TypeSafe.
+concurrency = 8
+
+# Where the TypeSafe key is. Keep the key itself out of this file if you share it; use
+# api_key = "..." only for a private config.
+api_key_file = "~/.config/typesafe/key"
+
+# Make the output shareable after sorting. zip_path on its own turns zip on.
+export {
+  resolve_links = true
+  zip           = true
+  zip_path      = "share/moose-results.zip"
+}
+```
+
+With that file in place, `uv run moose-sort` sorts the card and writes the zip in one go.
+
+How settings combine:
+
+- **Command line > config file > built-in defaults.** For example, `-o other` overrides `output`, and
+  photos named on the command line replace `inputs` (they aren't added to it). Every on/off setting has
+  a matching `--no-...` flag, so the config file can be overridden either way (`--no-smooth`, `--smooth`,
+  `--no-zip`, `--no-resolve-links`).
+- A key given on the command line (`--api-key`, `--api-key-file`) beats the config file's
+  `api_key`/`api_key_file`. The file can set one of them, not both.
+- **Relative paths are relative to the config file's folder**, not the current directory, and `~` is
+  expanded. A config file works the same wherever you run it from.
+- Every setting is optional, and a mistake is a usage error naming the file and setting: an unknown
+  name, a wrong type, an invalid `events` value, or HCL syntax. Variables and interpolation (`${...}`)
+  aren't supported; write values literally.
+- `--estimate` and `--dry-run` are command-line only.
+- **If the config sets `inputs`, running with no photos sorts them**, which calls the API and costs
+  money. To only export an earlier run's results, use `--export DIR`, which ignores `inputs`:
+  `uv run moose-sort --export sorted --zip`.
+- `moose-sort.hcl` is in `.gitignore`, since it may hold a key or personal paths.
 
 ### Output
 
@@ -116,13 +187,18 @@ and optionally zip it:
 
 ```sh
 # Sort and export in one go
-uv run moose-sort path/to/photos -o sorted --zip                 # writes sorted/ with copies + sorted.zip
+uv run moose-sort path/to/photos -o sorted --zip     # writes sorted/ with copies + sorted.zip
 
-# Export an existing output folder; no inputs, no API calls, no key needed
-uv run moose-sort -o sorted --resolve-links                      # copies only
-uv run moose-sort -o sorted --zip-path ~/share/moose-results.zip # copies + zip at a chosen path
+# Export the results folder of an earlier run: no sorting, no API calls, no key needed
+uv run moose-sort --export sorted                    # resolve the symlinks only
+uv run moose-sort --export sorted --zip              # ...and write sorted.zip next to it
+uv run moose-sort --export sorted --zip-path ~/share/moose-results.zip
 ```
 
+- **`--export DIR`** is the way to package a previous result. It takes the results folder itself, so
+  there's nothing to re-sort and no photos to name. It always resolves the links; the zip is only
+  written with `--zip` or `--zip-path` (or `zip`/`zip_path` in the config file). It ignores `-o` and
+  the config file's `inputs`.
 - **`--resolve-links`** replaces each symlink with a copy of the original photo, at the same path and with
   the same name and timestamps. The originals are never moved or changed. It's safe to run again, and
   re-sorting into a resolved folder doesn't duplicate photos.

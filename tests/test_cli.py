@@ -35,6 +35,15 @@ def run_cli(*args) -> int:
     return 0
 
 
+@pytest.fixture(autouse=True)
+def isolated_cwd(tmp_path, monkeypatch):
+    """Run every CLI test from an empty directory, so a developer's ./moose-sort.hcl can't leak in."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    return cwd
+
+
 @pytest.fixture
 def key_file(tmp_path):
     p = tmp_path / "api_key"
@@ -388,3 +397,51 @@ def test_zip_dir_refuses_symlinks(tmp_path):
     (d / "link.jpg").symlink_to(tmp_path / "real.jpg")
     with pytest.raises(ValueError, match="symlink"):
         zip_dir(d, tmp_path / "d.zip")
+
+
+# --- --export DIR: resolve (and optionally zip) an earlier run's results --------------------------
+
+@pytest.fixture
+def earlier_run(scene, tmp_path, key_file, fake_api):
+    """An output folder of symlinks from a previous sort; returns (folder, requests sent so far)."""
+    out = tmp_path / "results"
+    run_cli(scene, "-o", out, "--api-key-file", key_file)
+    return out, len(fake_api.requests)
+
+
+def test_export_resolves_without_api_or_key(earlier_run, fake_api, tmp_path, no_default_key):
+    out, sent = earlier_run
+    assert run_cli("--export", out) == 0
+    assert len(fake_api.requests) == sent
+    assert tree(out) == [] and len(files_in(out)) == 5 + 2
+    assert not (tmp_path / "results.zip").exists()      # zipping is opt-in
+
+
+def test_export_with_zip(earlier_run, tmp_path):
+    import zipfile
+    out, _ = earlier_run
+    assert run_cli("--export", out, "--zip") == 0
+    with zipfile.ZipFile(tmp_path / "results.zip") as zf:
+        assert "results/event_0000_2024-10-30_162804/animal/moose/moose1.jpg" in zf.namelist()
+
+
+def test_export_with_zip_path(earlier_run, tmp_path):
+    out, _ = earlier_run
+    assert run_cli("--export", out, "--zip-path", tmp_path / "share" / "x.zip") == 0
+    assert (tmp_path / "share" / "x.zip").is_file()
+
+
+def test_export_takes_precedence_over_out(earlier_run, tmp_path):
+    out, _ = earlier_run
+    assert run_cli("--export", out, "-o", tmp_path / "ignored") == 0
+    assert tree(out) == [] and not (tmp_path / "ignored").exists()
+
+
+def test_export_errors(earlier_run, scene, tmp_path, fake_api):
+    out, sent = earlier_run
+    assert run_cli("--export", tmp_path / "missing") == 2
+    assert run_cli("--export", out, scene) == 2          # photos to sort make no sense here
+    assert run_cli("--export", out, "--estimate") == 2
+    assert run_cli("--export", out, "--dry-run") == 2
+    assert len(fake_api.requests) == sent
+    assert len(tree(out)) == 5                           # nothing was resolved by the failed calls

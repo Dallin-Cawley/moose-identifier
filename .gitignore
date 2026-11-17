@@ -9,6 +9,9 @@ sorted*/
 # Local spend log of live TypeSafe calls (pythonproject.budget)
 .typesafe_spend.jsonl
 
+# Personal moose-sort config: may hold an API key or local paths
+moose-sort.hcl
+
 # PyCharm sample script
 src/main.py
 

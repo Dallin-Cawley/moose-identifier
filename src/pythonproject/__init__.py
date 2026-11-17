@@ -19,6 +19,7 @@ from .classify import Category, Result
 from .identify import (SMOOTH_NEIGHBOURS, TOKENS_PER_IMAGE, IdentificationStrategy, SinglePhoto,
                        find_neighbours, flag_for_review, smooth)
 from .events import STRATEGIES, Event, EventStrategy, read_timestamp
+from .config import DEFAULT_CONFIG_NAME, ConfigError, find_config, load_config
 from .export import is_copy_of, resolve_links, zip_dir
 from .questions import PRICE_PER_TOKEN
 
@@ -216,23 +217,31 @@ async def run(
     return 1 if failed else 0
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="moose-sort",
         description="Group photos into 10-minute events, classify them with Jev, and symlink them "
                     "into <event>/{animal/moose,animal/not_moose,animal/not_moose_check,no_animal,unsure}/ folders.",
+        epilog=f"Settings can also come from an HCL file: --config PATH, or ./{DEFAULT_CONFIG_NAME} if it "
+               "exists. Command-line options override the file.",
     )
     parser.add_argument("inputs", nargs="*", type=Path,
-                        help="image files and/or directories. May be left out with --resolve-links or "
-                             "--zip to export an existing output directory without calling the API")
+                        help="image files and/or directories (default: `inputs` from the config file). "
+                             "May be left out with --resolve-links or --zip to export an existing output "
+                             "directory without calling the API")
+    parser.add_argument("-c", "--config", type=Path, metavar="PATH",
+                        help=f"HCL config file (default: ./{DEFAULT_CONFIG_NAME} if it exists)")
+    parser.add_argument("--no-config", action="store_true",
+                        help=f"ignore ./{DEFAULT_CONFIG_NAME} even if it exists")
     parser.add_argument("-o", "--out", type=Path, default=Path("sorted"),
                         help="output directory (default: ./sorted)")
     parser.add_argument("-e", "--events", choices=sorted(STRATEGIES), default="static",
                         help="event windows: 'static' = fixed 10-min grid from the first photo; "
                              "'rolling' = each event starts at the first photo not in the previous "
                              "event (default: static)")
-    parser.add_argument("--no-smooth", action="store_true",
-                        help="don't promote a photo to moose when the frame next to it in the same event is a moose")
+    parser.add_argument("--smooth", action=argparse.BooleanOptionalAction, default=True,
+                        help="promote a photo to moose when the frame next to it in the same event is "
+                             "a moose (default: on; --no-smooth turns it off)")
     parser.add_argument("--estimate", action="store_true",
                         help="print the estimated cost and exit without calling the API")
     parser.add_argument("-j", "--concurrency", type=int, default=8,
@@ -245,32 +254,69 @@ def main() -> None:
                                 "shell history and the process list)")
     key_group.add_argument("--api-key-file", type=Path, metavar="PATH",
                            help=f"file containing the TypeSafe API key. Without either option the key "
-                                f"comes from {DEFAULT_KEY_FILE}, then $TYPESAFE_API_KEY, then a "
-                                "hidden prompt if running in a terminal")
-    parser.add_argument("--resolve-links", action="store_true",
+                                f"comes from the config file, then {DEFAULT_KEY_FILE}, then "
+                                "$TYPESAFE_API_KEY, then a hidden prompt if running in a terminal")
+    parser.add_argument("--resolve-links", action=argparse.BooleanOptionalAction, default=False,
                         help="after sorting, replace each symlink in the output with a copy of the "
                              "original photo, so the folder can be shared (originals are untouched)")
-    parser.add_argument("--zip", action="store_true",
+    parser.add_argument("--zip", action=argparse.BooleanOptionalAction, default=None,
                         help="after resolving links, zip the output directory (implies --resolve-links)")
     parser.add_argument("--zip-path", type=Path, metavar="PATH",
                         help="where to write the zip (implies --zip; default: <out>.zip next to the "
                              "output directory)")
-    args = parser.parse_args()
+    parser.add_argument("--export", type=Path, metavar="DIR",
+                        help="don't sort: take DIR, the output folder of an earlier run, replace its "
+                             "symlinks with copies of the originals, and zip it if --zip is given. "
+                             "Never calls the API and needs no key; config `inputs` are ignored")
+    return parser
 
+
+def main() -> None:
+    parser = build_parser()
+
+    # Pass 1 finds the config file; its values become defaults, so pass 2's command line overrides them.
+    pre, _ = parser.parse_known_args()
+    config_path = None if pre.no_config else find_config(pre.config, Path.cwd())
+    config: dict = {}
+    if config_path is not None:
+        try:
+            config = load_config(config_path)
+        except ConfigError as e:
+            parser.error(str(e))
+        print(f"config: {config_path}", file=sys.stderr)
+    config_key = {k: config.pop(k) for k in ("api_key", "api_key_file") if k in config}
+    parser.set_defaults(**config)
+    args = parser.parse_args()
+    if args.api_key is None and args.api_key_file is None:   # a key on the command line beats the file's
+        args.api_key = config_key.get("api_key")
+        args.api_key_file = config_key.get("api_key_file")
+    if args.concurrency < 1:
+        parser.error("--concurrency must be at least 1")
+
+    if args.export is not None:
+        if pre.inputs:
+            parser.error("--export takes an existing results folder; don't also give photos to sort")
+        if args.estimate or args.dry_run:
+            parser.error("--export can't be combined with --estimate or --dry-run")
+        args.out = args.export
     out_dir = args.out.resolve()
-    zip_path = (args.zip_path.resolve() if args.zip_path
-                else out_dir.with_name(out_dir.name + ".zip") if args.zip else None)
+    do_zip = args.zip if args.zip is not None else args.zip_path is not None   # --no-zip beats zip_path
+    zip_path = None if not do_zip else (
+        args.zip_path.resolve() if args.zip_path else out_dir.with_name(out_dir.name + ".zip"))
     export = args.resolve_links or zip_path is not None
     if export and args.dry_run:
         parser.error("--resolve-links/--zip need an output directory; they can't be used with --dry-run")
     if zip_path is not None and zip_path == out_dir:
         parser.error("--zip path is the output directory itself")
+    if args.export is not None:
+        args.resolve_links = export = True     # resolving is the point of --export; zipping is opt-in
 
-    if not args.inputs:
+    if args.export is not None or not args.inputs:
         if not export:
-            parser.error("the following arguments are required: inputs")
+            parser.error("the following arguments are required: inputs (on the command line or as "
+                         "`inputs` in a config file)")
         if not out_dir.is_dir():
-            parser.error(f"output directory not found: {out_dir}")
+            parser.error(f"results folder not found: {out_dir}")
         sys.exit(export_output(out_dir, zip_path))
 
     images = find_images(args.inputs, exclude=out_dir)
@@ -297,7 +343,7 @@ def main() -> None:
     if not args.dry_run:
         out_dir.mkdir(parents=True, exist_ok=True)
     rc = asyncio.run(run(photos, strategy, identify, out_dir, args.concurrency, args.dry_run, api_key,
-                         smoothing=not args.no_smooth))
+                         smoothing=args.smooth))
     if export:
         rc = max(rc, export_output(out_dir, zip_path))
     sys.exit(1 if missing else rc)
