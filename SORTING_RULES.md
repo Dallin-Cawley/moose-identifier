@@ -1,406 +1,399 @@
 # Moose-sort: sorting rules
 
-`moose-sort` groups trail-camera photos into **events** (10-minute windows), asks Jev whether each photo
-shows an animal and whether that animal is a moose, and symlinks every photo into
-`<event>/<category>/`.
+This file is the source of truth for how photos are labelled and sorted: the rules, examples, and
+how the code applies them.
+
+**The animals** are, in this order: `human`, `dog`, `cougar`, `deer`, `elk`, `moose`. Any other
+creature (a raccoon, a bird) isn't one of them; Jev still notices it as "an animal", but can't name
+it (`unidentified`, see 1.2).
+
+`moose-sort` works in three steps:
+
+1. **Label** every photo with the animals Jev sees in it, or `no_animal` if there are none.
+2. **Group** the photos that have an animal into **events**. Photos without an animal are left out.
+3. **Sort** each event's photos into a folder named after its animals, such as `moose` or
+   `moose-deer`.
 
 ```sh
-uv run moose-sort src/images --estimate                      # print the cost; sends nothing
-uv run moose-sort src/images -o sorted                       # default: static events, single-photo identification
-uv run moose-sort src/images -o sorted_rolling --events rolling
+uv run moose-sort src/images --estimate     # cost of the photos not labelled yet; sends nothing
+uv run moose-sort src/images -o sorted      # label, group and link
+uv run moose-sort --export sorted --zip     # share: real copies with labels as keywords, zipped
 ```
 
-Use a separate output folder for each event strategy. They produce different event folders, and
-mixing them in one output folder gets confusing.
-
 ---
 
-## 1. Events
+## 1. Labelling each photo
 
-An **event** is a 10-minute window of time. Every photo belongs to exactly one event.
+### 1.1 Three questions, in order of priority
 
-Rules common to both strategies:
+Every photo is one request to Jev; the photo is sent once and all questions ride along. They answer,
+in order of importance:
 
-- **Timestamp:** the photo's EXIF capture time (`DateTimeOriginal`, else `DateTime`) from the camera clock.
-  The filename and file date are never used, because filenames are not in time order.
-  A photo without a capture time is reported as an error and left unsorted.
-- **Window:** an event covers `[start, start + 10 min)`. The start is included, the end is excluded.
-- **Boundary rule:** a photo taken exactly at, or after, the end of a window belongs to the **next** event.
-- **Folder name:** `event_<NNNN>_<YYYY-MM-DD>_<HHMMSS>`, where the date and time are the event's start.
-
-The strategy, chosen with `--events`, decides where windows start.
-
-### Static windows (`--events static`, default)
-
-A fixed grid starting at the **earliest photo in the input**, running continuously across days and gaps.
-
-- Event *N* covers `[anchor + N×10 min, anchor + (N+1)×10 min)`.
-- `N` is the window number counted from the anchor, so numbers skip wherever no photos were taken.
-  Only windows that contain photos get a folder.
-- A visit that crosses a grid line is split into two events.
-
-Examples with this photo set (anchor = first photo, `2024-10-08 09:03:13`):
-
-| Photo taken                    | Event | Window                          |
-|--------------------------------|-------|---------------------------------|
-| 2024-10-08 09:03:13            | 0     | 09:03:13 – 09:13:13             |
-| 2024-10-08 09:12:59 (hypothetical) | 0 | 09:03:13 – 09:13:13             |
-| 2024-10-08 09:13:13 (hypothetical) | 1 | 09:13:13 – 09:23:13 (boundary → new event) |
-| 2024-10-30 16:31:40            | 3212  | 16:23:13 – 16:33:13             |
-| 2024-10-30 16:34:02            | 3213  | 16:33:13 – 16:43:13             |
-
-> **Caveat:** the anchor is the earliest photo *in the input*, so running on a different set of photos
-> (a subset, or a new card) can shift every window. Process all of a card's photos together.
-
-### Rolling windows (`--events rolling`)
-
-Each event starts at the **first photo that doesn't fit in the previous event's window** and lasts 10 minutes.
-
-- Photos are taken in time order. A photo at or after `current.start + 10 min` starts a new event whose
-  start is that photo's timestamp.
-- Events are numbered 0, 1, 2, … with no gaps.
-- The result does not depend on photos before the current event, so a later card doesn't shift earlier events.
-  (The numbering does still depend on the input.)
-
-Example with this photo set, on 2024-10-30: events start at 16:28:04, 16:39:16, 16:49:27, …
-
-### The moose crossing a boundary
-
-A moose is photographed from minute 8 through minute 11 of a window:
-
-| Strategy | Photos at minutes 8–9 | Photos at minutes 10–11 |
-|----------|-----------------------|-------------------------|
-| static   | event *N*             | event *N+1*: the grid line at minute 10 splits the visit |
-| rolling  | event *N*             | event *N+1*, which starts at the minute-10 photo; the following 10 minutes go with it |
-
-With this photo set: static gives **61** events, rolling gives **56**.
-
----
-
-## 2. Identification (per photo)
-
-### 2.1 The questions
-
-Each request asks Jev these questions about `photo`. All wording is in `src/pythonproject/questions.py`.
-
-| ID | Type | Question | Used for |
+| Priority | Question | Asked as | Decides |
 |---|---|---|---|
-| `animal` | yes/no | Is there a real, living animal in `photo`? (people, drawings, toys and statues don't count) | animal or not |
-| `species`, `species_rev` | choice | Which kind of animal is in `photo`? moose / deer / elk / small_animal (calves, antlerless cows and partly hidden moose count as moose) | which species |
-| `f_hump` | yes/no | A large, heavy body with a raised hump at the shoulders? | moose anatomy |
-| `f_pale_legs` | yes/no | Long legs that look paler than the body? | moose anatomy |
-| `f_long_muzzle` | yes/no | A long, broad muzzle that overhangs the mouth? | moose anatomy |
+| **1** | **Is there an animal?** | `animal`: Is there a real, living animal in `photo`? (drawings, toys and statues don't count; people are left out here) and `human`: Is there a person in `photo`? | which photos form **events** |
+| **2** | **Is it a moose?** | `species` / `species_rev`: Which kind of animal is in `photo`? moose / deer / elk / cougar / dog / small_animal, asked in both option orders and averaged | the `moose` label |
+| **3** | **Which other animals?** | one yes/no question each: Is there a person / dog / cougar / deer / elk in `photo`? | the other labels |
 
-- **The species question is asked twice,** with the options in opposite orders, and the two answers are
-  averaged. TypeSafe notes that Jev can lean toward the first option; averaging found 1–2 more moose on the
-  tuning set.
-- **Moose anatomy** is three separate, observable yes/no questions instead of one vague "does it look like
-  a moose?". Moose seen from behind were the main error, and their pale "stockings" and humped back stay
-  visible even when the head doesn't.
+- **Tier 1 asks about any animal, not just the six.** That makes it the most reliable: on the
+  labelled photos it never missed an animal (section 6). People get their own question, because
+  the rules count them and the `animal` question doesn't.
+- **Tier 2 is a single choice between species, not a yes/no "is there a moose?".** A first version
+  asked yes/no per animal; it found only 70 of 87 moose, because Jev's yes/no about moose stayed
+  around 0.5 for dark or rear-view photos. Picking the most likely species is a much clearer
+  judgment. Asking in both option orders and averaging corrects Jev's slight lean to the first
+  option.
+- **Tier 3 can label several animals at once** (a person and a dog), so each has its own yes/no.
+  Each question's "no" case names the animal it's most easily mistaken for (coyote is not a dog,
+  bobcat is not a cougar, elk and moose are not deer).
+- The exact wording is in `src/pythonproject/questions.py`.
 
-### 2.2 From answers to a folder
+### 1.2 From answers to labels
 
-**Reading the answers**
+Thresholds: a yes/no above **0.7** is a yes, below **0.3** a no, in between **unsettled**.
 
-- **animal:** > 0.7 = yes, < 0.3 = no, anything in between is unsettled.
-- **species:** use the average of the two option orders. "Moose" if moose is the **top option**; "not
-  moose" if the moose probability is **< 0.3**; in between is unsettled.
-- **moose anatomy is visible** if **hump > 0.5 and (pale legs > 0.7 or long muzzle > 0.5)**.
+| Tier | Rule |
+|---|---|
+| 1 | The photo **has an animal** if `animal` > 0.7, or any animal below is confirmed (this is how people count). |
+| 2 | **`moose`** if `animal` > 0.7 **and** moose is the top species option (both orders averaged), even under 0.5. |
+| 3 | **`human`, `dog`, `cougar`, `deer`, `elk`**: their own question > 0.7. |
 
-| Animal?   | Species                            | Moose anatomy? | Folder              |
-|-----------|------------------------------------|----------------|---------------------|
-| yes       | moose on top                       | any            | `animal/moose`      |
-| yes       | moose < 0.3                        | no             | `animal/not_moose`  |
-| yes       | moose < 0.3                        | **yes**        | `unsure`            |
-| yes       | moose 0.3+ but not on top          | any            | `unsure`            |
-| no        | moose ≤ 0.7                        | any            | `no_animal`         |
-| no        | moose > 0.7 (contradiction)        | any            | `unsure`            |
-| unsettled | anything                           | any            | `unsure`            |
+The photo's keywords are its animals in the order above (human, dog, cougar, deer, elk, moose). If it has an animal but none of the six
+was identified, it's **`unidentified`**: a raccoon, a bird, or a moose too dark to call. If it has
+no animal, it's **`no_animal`**.
 
-**Moose anatomy can only move a photo *to* `unsure`, never into `animal/moose`,** so it can't add a deer
-to the moose folder.
+| Jev's answers (anything not listed is low) | Labels | In an event? |
+|---|---|---|
+| animal 0.95, species top = moose | `moose` | yes |
+| animal 0.95, species top = moose (P 0.45) | `moose` | yes |
+| animal 0.96, species top = moose, deer 0.81 | `deer`, `moose` | yes |
+| animal 0.90, human 0.90, dog 0.85 | `human`, `dog` | yes |
+| animal 0.05, human 0.90 | `human` | yes |
+| animal 0.95, species top = deer, deer 0.93 | `deer` | yes |
+| animal 0.95, species top = deer (P(moose) 0.3), deer 0.5 | `unidentified` (moose if smoothing confirms it) | yes |
+| animal 0.95, species top = small_animal | `unidentified` | yes |
+| animal 0.60, species top = moose | `no_animal`: Jev isn't sure there's an animal | no |
+| everything low | `no_animal` | no |
 
-### 2.3 Event smoothing (default on; `--no-smooth` turns it off)
+### 1.3 Smoothing (default on; `--no-smooth` turns it off)
 
-After every photo is identified, code (not Jev) revises the results. A photo is **promoted to
-`animal/moose`** when all of these hold:
+A moose walking away from the camera is often a sure animal whose species Jev calls "deer", while the
+frames just before or after it, which show its head, are a clear moose. After every photo is
+labeled, code (not Jev) **confirms an animal the photo was unsettled about when the photo directly
+before or after it has that animal confirmed**, less than 10 minutes away.
 
-1. it landed in `animal/not_moose` or `unsure`, and Jev is sure it shows an animal (animal > 0.7);
-2. the frame directly before or after it, **in the same event**, was identified as a moose;
-3. Jev did not confidently call it another species: moose ≥ **0.1**, or moose anatomy is visible.
-   On the tuning set, 58 of 61 real deer scored below 0.1, and every moose that smoothing rescued scored
-   0.20 or more.
+"Unsettled" means:
 
-Notes:
+- **moose:** an animal is sure (> 0.7), moose isn't the top species, but Jev didn't rule it out:
+  P(moose) ≥ **0.1**. On the old tuning set, 58 of 61 real deer scored below 0.1, and every moose
+  smoothing rescued scored 0.20 or more.
+- **the others:** their yes/no is between 0.3 and 0.7.
 
-- Only the neighbours' *original* results count, so promotions never chain along a sequence.
-- `results.jsonl` marks promoted photos with `"smoothed": true`, and the terminal prints
+Example: three frames one minute apart, all a sure animal.
+
+| Frame | Species | Before smoothing | After smoothing |
+|---|---|---|---|
+| a | moose on top | `moose` | `moose` |
+| b | deer on top, P(moose) 0.3 | `unidentified` | **`moose`** (a, right before it, is a moose) |
+| c | deer on top, P(moose) 0.3 | `unidentified` | `unidentified`: b was itself only unsettled, and additions never chain |
+
+All three stay in the event (tier 1). Smoothing only decides what they're called.
+
+- Smoothing uses answers the run already has, so it costs nothing.
+- An answer below 0.3 (or a moose below 0.1) is never overruled.
+- `results.jsonl` lists what smoothing added (`"smoothed": ["moose"]`), and the terminal prints
   `(smoothed: moose in neighbouring frame)`.
-- Smoothing costs nothing: it uses answers the run already has.
-- It only sees neighbours that are in the same run, so sort a whole card at once.
 
-### 2.3b The check folder: `animal/not_moose_check/`
+---
 
-After smoothing, every photo still in `animal/not_moose` **whose event also contains a moose photo** is
-moved to `animal/not_moose_check/`. That folder is for you to look through by eye: "Jev says not a
-moose, but a moose was here at the same time."
+## 2. Events
 
-- **Why:** missed moose are almost always a moose walking away from the camera. From behind, at night,
-  it looks like a deer for several frames in a row, and smoothing can't rescue it because its neighbours
-  are rear views too (see "Known weak spot" below). Real deer, raccoons and birds visited in events of
-  their own.
-- **Measured:**
-  - test set (default setup): **5 photos were moved to the check folder, and all 5 are moose.** Those were
-    every remaining hard miss, so none are left;
-  - tuning set: **0 photos**. None of its 61 deer, raccoon and bird photos are in a moose event.
-- `animal/not_moose` now means "not a moose, and no moose was around": it can be trusted without review.
-- A real deer that walks through *while* a moose is in the same 10-minute event will also land in the
-  check folder. That's the intended trade-off: a few extra photos to glance at, instead of missed moose.
-  The replays only see recorded photos, so on a whole card expect somewhat more photos in the folder
-  than the tests show.
-- It's always on, costs nothing (code only), and the terminal marks these photos with
-  `(check: 'not a moose' in an event with moose)`.
+### 2.1 Rules
 
-### 2.4 One photo per request
+The rules:
 
-Each request sends **one photo** (about 4,400 tokens, ~$0.94 for this card). Sending its neighbouring
-frames from the same event as well was tried, and offered for a while as `--identify neighbours`. It was
-**removed** because it cost about 5× as much for no clear gain (see 2.6). Event smoothing and the check
-folder get the benefit of neighbouring frames in code, for free.
+- **Only photos with an animal take part (tier 1).** A `no_animal` photo belongs to no event and
+  isn't linked anywhere. The original stays where it is. An `unidentified` photo does take part:
+  it's animal activity, so it keeps the event going and is linked into it.
+- **An event ends when 10 minutes pass with no animal detected.** A photo with an animal taken 10
+  minutes or more after the previous animal photo starts a new event. Exactly 10:00 counts as a gap.
+- **There is no maximum length.** A moose that stays in view for three hours, with no gap of 10
+  minutes, is one event.
+- **Empty frames don't keep an event open.** The camera firing on wind or a branch doesn't count
+  as an animal.
+- **Time** is the photo's EXIF capture time (`DateTimeOriginal`, else `DateTime`). Filenames and
+  file dates are never used. A photo without a capture time is reported as an error and left out.
 
-The code keeps the `IdentificationStrategy` base class in `identify.py`, with `single` as its only
-strategy, so another approach can be added later.
+### 2.2 Event types and names
 
-### 2.5 Image preparation
-
-The API rejects any image wider or taller than 1568 px, and doesn't resize it for you. The trail camera
-shoots 2688×1512, so each photo is prepared before upload (`prepare_image` in `classify.py`):
-
-- **rotated upright** from the EXIF orientation;
-- **the camera's date/time/temperature banner** (the bottom 84 rows) **is cropped off.** It's camera
-  overlay, not scene. Cropping it saved 5% of tokens and cost no accuracy;
-- **scaled** to fit 1568 px on the longest side (1568×833 for this camera). Images under 280 px are
-  scaled up;
-- **re-encoded** as a baseline JPEG with **no metadata**, so the camera's GPS location is not uploaded.
-
-The originals on disk are never modified. If any photo's API call fails, it is **not sorted**: it is
-reported as an error and the run exits with status 1. A failure is never treated as "no animal".
-
-### 2.6 How this was tuned, and how well it works
-
-The goal, as agreed: **catch every moose.** The worst outcome is a moose in `animal/not_moose` or
-`no_animal` (a "hard miss"). `unsure` and the check folder are acceptable, since both are meant to be
-reviewed. `animal/moose` must stay clean.
-
-**Data**, all labelled by eye; files are in `tests/fixtures/`:
-
-- **dev (232 photos), for tuning:**
-  - the earlier 124 photos;
-  - 108 hard cases picked on purpose: every deer, raccoon and bird event, rear-view and partial moose,
-    and empty night frames inside animal events.
-- **test (200 photos), for the final check:**
-  - drawn at random and **labelled before any Jev call.** The SHA-256 of `test_labels.csv` was recorded
-    then (`52ddbbad…`) and still matches;
-  - used once, for the final setups;
-  - 112 moose, 82 no animal, 2 other animals, 4 ambiguous;
-  - it has very few non-moose animals, so the "false moose" checks rely on dev's 61.
-- `ambiguous` photos (an animal may be there, but no one could name the species from one frame) are not
-  scored.
-- Two dev labels were changed after review: STC_1959 and STC_3120 went from `no_animal` to `ambiguous`
-  (a faint shape by the tree).
-
-**Experiments on dev** (every variant in an arm shared one request, so variants saw identical input):
-
-| # | Idea | Result | Kept? |
+| Type | Contains | Name | Example folder |
 |---|---|---|---|
-| E1 | Species options in reverse order, averaged with normal order | Slightly better: +1–2 moose found | ✅ |
-| E2 | Separate moose-anatomy questions → "rescue to `unsure`" rule | Hard misses 5–6 → 1–2 (3 independent runs), no false moose | ✅ |
-| E2 | White rump patch / head visible questions | Not useful: moose rumps look pale in infrared too | ❌ |
-| E3a | Crop the camera banner | Same accuracy, 5% cheaper | ✅ |
-| E3b | Boost contrast on infrared photos | No gain | ❌ |
-| E4 | Zoom: Box around the animal, then species on a close-up crop | +2 moose found, but hard misses unchanged; ~2× cost | ❌ |
-| E5 | Neighbouring frames (±1, ±2) in the request | ±2: 85/87 moose, 0 hard misses; ~4× cost | ❌ shipped as `--identify neighbours`, then removed (see below) |
-| E6 | Event smoothing in code | 86/87 moose, 0 hard misses, **no extra cost** | ✅ default |
-| E7 | Repeat runs | Results within ±1 photo between runs | — |
+| **Moose event** | only moose | `moose` | `2024-10-30_162804_moose` |
+| **Mixed event** | moose and other animals | `moose-<others>` | `2024-10-30_162804_moose-deer` |
+| Other event | no moose | `<animals>` | `2024-10-30_170804_human-dog` |
+| Other event | nothing identified | `unidentified` | `2024-10-30_031522_unidentified` |
 
-**Final check on the 200 unseen test photos** (196 scored, 112 moose):
+- The name lists every animal identified **anywhere in the event**, joined by `-`.
+  `unidentified` photos don't add to the name. An event made only of them, such as a raccoon, is
+  named `unidentified`.
+- Moose always comes first. The others follow the animal order: human, dog, cougar, deer, elk.
+  So it's `moose-human-dog-elk`, never `elk-moose-dog-human`.
+- **The folder is the event's start time, then its name:** `<YYYY-MM-DD>_<HHMMSS>_<name>`. The time
+  is the first animal photo of the event. It keeps repeated names like `moose` apart and sorts the
+  folders in time order.
+- `events.csv` records each event's type as `moose`, `mixed` or `other`.
 
-| Setup | Correct | Moose found | Moose → `unsure` | Moose → check folder | **Hard misses** | False moose | Cost (this card) |
-|---|---|---|---|---|---|---|---|
-| Previous rules (one species question, no averaging, rescue, smoothing or check folder)¹ | 173 (88%) | 93 | 7 | — | 12 | 0 | ~$0.87 |
-| **`single` + smoothing (default)** | **186 (95%)** | **106** | 1 | 5 (of 5 in the folder) | **0** | **0** | **~$0.94** |
-| Neighbouring frames + smoothing (removed) | 189 (96%) | 105 | 3 | 4 (of 4 in the folder) | **0** | 0 | ~$4.61 |
+### 2.3 Worked example
 
-Without the check folder, those moose would be hard misses: 5 for `single`, 4 with neighbouring frames.
+A night on the trail camera. Labels are after smoothing.
 
-**Why sending neighbouring frames was removed:**
+| Time | Photo | Labels | Event |
+|---|---|---|---|
+| 16:28:04 | moose1 | `moose` | **A** starts |
+| 16:31:04 | deer | `deer` | A |
+| 16:37:04 | empty | `no_animal` | none: dropped, and it doesn't extend A |
+| 16:42:04 | moose2 | `moose` | **B** starts: 11 min after the last animal (16:31:04) |
+| 16:44:04 | blurry | `no_animal` (animal 0.5: Jev isn't sure anything is there) | none: dropped |
+| 17:08:04 | walker | `human`, `dog` | **C** starts: 26 min after the last animal |
 
-- It got 3 more photos right and found 1 fewer moose, from a single run. Repeat runs moved results by
-  about ±1 photo, so the difference is close to noise.
-- It costs about 5× as much.
-- With the check folder, both setups leave no hard misses.
-- The recordings remain in `tests/fixtures/experiments/` (arm `E_nb2`).
+Result:
 
-No person, empty frame, deer or other animal reached `animal/moose` in any measured configuration:
-- dev: `single` + smoothing, and neighbouring frames without smoothing;
-- test: both setups in the table.
-Neighbouring frames + smoothing wasn't run on dev.
+| Event | Folder | Type | Photos |
+|---|---|---|---|
+| A | `2024-10-30_162804_moose-deer` | mixed | moose1, deer |
+| B | `2024-10-30_164204_moose` | moose | moose2 |
+| C | `2024-10-30_170804_human-dog` | other | walker |
 
-**Known weak spot: a moose walking away from the camera for many frames in a row.**
+More edge cases:
 
-- All 5 photos the default setup filed as "not a moose" on the test set are like this. So was a live
-  check on STC_1063–1070, the same moose from behind for 8 frames.
-- From behind, at night, its pale legs and light rump look like a deer's. Jev says "deer".
-- The neighbouring frames are rear views too, so smoothing has no moose frame to borrow from.
-- Sending neighbouring frames didn't fix it either: half of that sequence still went to `not_moose`.
-- **This is what the check folder (2.3b) is for:** these photos now land in `animal/not_moose_check/`
-  instead of `animal/not_moose`.
-- An untested idea for next time: an event-level rule (most frames in this event are moose, none
-  confidently deer → reconsider its "deer" frames). It needs fresh labelled photos to validate, since the
-  test set has now been used.
+| Animal photos at (minutes) | Events |
+|---|---|
+| 0, 9:59, 19:58 | one event: no gap reaches 10 minutes, even though it lasts almost 20 |
+| 0, 10:00 | two events: exactly 10 minutes is a gap |
+| 0, then empty frames at 5 and 12, then an animal at 14 | two events: the empty frames don't count |
+| every 5 minutes for 3 hours | one event, 2 h 55 min long |
+
+---
 
 ## 3. Directory structure
 
-Photos are **symlinked**, not copied; the originals stay in `src/images/`. Category folders are created only
-when a photo lands in them, so an event with no moose has no `animal/moose/` folder.
-
-Event folder names below are real (static strategy, full photo set). Which photo is in which category is
-illustrative only.
+Photos are **symlinked**, not copied; the originals stay where they are. Each event is one folder,
+and its photos sit directly in it. One more top-level folder, **`unsure/`**, records every photo
+that surely shows an animal Jev couldn't identify (`unidentified`).
 
 ```
-sorted_static/
-├── results.jsonl                         # one line per photo: path, event, event_start, strategy,
-│                                         #   identify, category, animal & moose probabilities,
-│                                         #   top species, anatomy answers, smoothed, model, input_tokens
-├── events.csv                            # one row per event: event, folder, start, end,
-│                                         #   moose, not_moose, not_moose_check, no_animal, unsure, errors
-├── event_0000_2024-10-08_090313/
-│   ├── animal/
-│   │   ├── moose/
-│   │   │   └── STC_0005.JPG -> …/src/images/12.11.4.2024/STC_0005.JPG
-│   │   ├── not_moose/
-│   │   │   └── STC_0011.JPG -> …
-│   │   └── not_moose_check/            # "not a moose" in an event with moose: check by eye
-│   │       └── STC_0012.JPG -> …
-│   ├── no_animal/
-│   │   └── STC_0001.JPG -> …
-│   └── unsure/
-│       └── STC_0014.JPG -> …
-├── event_0200_2024-10-09_182313/         # numbers skip: windows 1–199 had no photos
-│   └── …
-├── event_0201_2024-10-09_183313/
-│   └── …
-├── …
-├── event_3212_2024-10-30_162313/
-│   ├── animal/
-│   │   └── not_moose/
-│   └── no_animal/
-├── …
-└── event_3910_2024-11-04_124313/
-    └── …
+sorted/
+├── labels.jsonl                         # the label store (section 4): one line per photo, keyed by content hash
+├── results.jsonl                        # this run, one line per photo: path, capture time, event,
+│                                        #   labels, probabilities, smoothed, cached, model, input_tokens
+├── events.csv                           # one row per event: folder, name, type, start, end, photos,
+│                                        #   and how many of its photos show each animal (and unidentified)
+├── 2024-10-30_162804_moose-deer/
+│   ├── STC_3120.JPG -> …/src/images/12.11.4.2024/STC_3120.JPG
+│   └── STC_3121.JPG -> …
+├── 2024-10-30_164204_moose/
+│   ├── STC_3125.JPG -> …
+│   └── STC_3126.JPG -> …                # unidentified: in its event like any photo…
+├── 2024-10-30_170804_human-dog/
+│   └── STC_3130.JPG -> …
+└── unsure/                              # …and recorded here; only ever symlinks to the originals
+    └── STC_3126.JPG -> …/src/images/12.11.4.2024/STC_3126.JPG
 ```
 
-With `--events rolling` the layout is the same, but the folders are numbered sequentially and start at a
-photo's time:
-
-```
-sorted_rolling/
-├── results.jsonl
-├── events.csv
-├── event_0000_2024-10-08_090313/
-├── event_0001_2024-10-09_183312/
-├── event_0002_2024-10-09_184312/
-├── …
-└── event_0055_2024-11-04_124541/
-```
-
-If two photos in the same folder share a filename, the second link gets a short hash suffix
-(`STC_0001-1a2b3c4d.JPG`). Re-running on the same photos reuses existing links instead of duplicating them.
+- Photos labelled `no_animal` appear only in `results.jsonl` and `labels.jsonl`, with
+  `"event_folder": null`.
+- **`unsure/`** holds a link for each `unidentified` photo: Jev is sure there's an animal (tier 1)
+  but none of the six animals was identified (tiers 2 and 3), e.g. a moose too dark or too far from
+  behind, a raccoon, a bird. The photo **also stays in its event folder**, so the event is complete;
+  `unsure/` is the list to look through by eye. It is created only when there is such a photo,
+  and `results.jsonl` marks these photos with `"unsure": true`.
+- **`unsure/` only ever holds symlinks**, also after `--resolve-links`/`--export`: the photo's
+  copy lives in its event folder, so it isn't duplicated. In a zip they're stored as symlink entries
+  (no photo bytes): unzipping on Linux or macOS recreates the links, which work wherever the
+  originals are at the same path; Windows shows them as small text files.
+- When a photo is identified on a later run (relabelled, or confirmed by smoothing), its `unsure/`
+  link is removed.
+- If two photos in one event share a filename, the second link gets a short hash suffix
+  (`STC_0001-1a2b3c4d.JPG`).
+- **Re-running** reuses existing links. When labels change, for example after rewording a
+  question, a photo's event can change. The old link is then removed, along with any folder left
+  empty. Only links to photos labelled in the current run are touched.
+- An output folder from the old moose/not-moose layout (`event_0000_…/animal/moose/…`) is cleaned
+  up the same way on the first run of the new version.
 
 ---
 
-## 4. Cost at scale
+## 4. The label store and image keywords
 
-Jev bills **input tokens only**: $42 per billion ($0.042 per million) for `jev-1.14.0`. That's the price
-listed on TypeSafe's models page on 2026-11-15. Output tokens are free, and images are billed as ordinary
-input tokens. `--estimate` prints the projected cost for your photos before anything is sent.
+### 4.1 `labels.jsonl`: the source of truth, and the cache
 
-**Measured tokens per photo** with the current questions (banner cropped, 1568×833):
+Every photo's answers are stored in `labels.jsonl`, by default in the output folder. Use `--labels
+PATH`, or `labels = "..."` in the config file, to keep one store per card and share it between
+output folders.
 
-**4,377 tokens per photo**, measured on 432 photos.
+```json
+{"sha256": "9f2c…", "path": "/…/STC_3120.JPG", "size": 1412113, "mtime_ns": 1730301484000000000,
+ "model": "jev-1.14.0", "questions": "a1b2c3d4e5f6",
+ "probabilities": {"animal": 0.97, "species": {"moose": 0.86, "deer": 0.11, "elk": 0.02, ...},
+                   "human": 0.02, "dog": 0.01, "cougar": 0.01, "deer": 0.81, "elk": 0.04},
+ "labels": ["deer", "moose"], "time": "2026-11-18T14:02:11"}
+```
 
-| Volume                                   | Estimated cost |
-|------------------------------------------|----------------|
-| 1 photo                                  | $0.00018       |
-| 1,000 photos                             | $0.18          |
-| **This card: 5,061 photos**              | **~$0.94**     |
-| 50,000 photos (e.g. ~10 cards like this) | ~$9.20         |
-| 100,000 photos                           | ~$18.40        |
-| 1,000,000 photos                         | ~$184          |
+- **Keyed by the SHA-256 of the photo's bytes.** A renamed or moved photo is still recognised, and
+  a different photo with the same name is not mistaken for it. Path, size and modification time are
+  kept so the hash isn't recomputed for unchanged files.
+- **A photo is sent to Jev only if the store has no entry for it with the current model and
+  question wording** (`questions`, a fingerprint of `questions.py`). Re-running a card, adding a
+  few new photos, or re-sorting into another folder pays only for photos that are new.
+- **Probabilities are stored, not just labels.** Changing a threshold (0.7/0.3) or the smoothing
+  rule needs no new calls. Rewording a question changes the fingerprint, so every photo is asked
+  again on the next run.
+- Answers are written as soon as they arrive, so an interrupted or partly failed run keeps what it
+  paid for. Running it again finishes the rest. At the end of a run the file is rewritten with one
+  line per photo, including its final (smoothed) labels.
+- `--dry-run` reads the store but writes nothing, so answers paid for in a dry run are not kept.
 
-Rule of thumb: **about $0.18 per 1,000 photos.** Event smoothing and the check folder are free.
+### 4.2 Keywords in exported copies
 
-**Spent on development so far** (all recorded in `.typesafe_spend.jsonl`; run
-`python -m pythonproject.budget --report`):
+`--resolve-links`, `--zip` and `--export DIR` replace the symlinks in the event folders with
+**copies** of the originals (the links in `unsure/` stay links, see section 3), and write each
+photo's labels into its copy as **XMP keywords** (`dc:subject`):
 
-- about $0.05 before the $2 budget;
-- **$1.31 of the $2 optimisation budget**: 3,477 requests and 31.2 M tokens, covering the tuning
-  experiments, repeat runs, the final test runs and a live CLI check.
+```
+STC_3120.JPG   Keywords: deer, moose
+STC_3130.JPG   Keywords: human, dog
+STC_3126.JPG   Keywords: unidentified
+```
 
-What would change the estimate:
-
-- **Re-running costs again.** Nothing is cached, so classifying the same card twice pays twice.
-- **A different camera or resolution** changes tokens per photo. `results.jsonl` records
-  `input_tokens` for every photo.
-- **More questions** add a little. With the uncropped image, 2 questions used about 4,100 tokens and
-  the 9 questions of the experiments about 4,600. The banner crop takes about 225 tokens back off.
-- **Price changes or a new model version.** `questions.py` pins `jev-1.14.0`, so a new release won't
-  change prices or answers silently.
-- **Failed requests:** whether rejected requests are billed isn't documented. This estimate assumes they
-  aren't.
-- **Time** isn't estimated. Throughput depends on your organisation's rate limits (shown in the TypeSafe
-  console). The SDK retries rate-limited requests automatically, and `-j` sets how many run in parallel.
+- Lightroom, digiKam, darktable, Bridge, Windows Explorer (as "Tags"), macOS Finder/Spotlight and
+  most photo apps read these keywords, so whoever receives the zip can search and filter by animal.
+- **The image isn't re-encoded.** The keywords are inserted as their own metadata block (about 500
+  bytes); the pixels and the camera's EXIF stay exactly as they were.
+- **The originals are never written to.** Only the copies in the output folder get keywords.
+- A copy that already has XMP from another program is left as it was, with a warning, rather than
+  having that metadata overwritten. If a photo has no entry in the label store, it's copied without
+  keywords, also with a warning.
+- JPEG and PNG are supported.
 
 ---
 
-## 5. Testing without spending money
+## 5. Keeping the number of Jev calls down
+
+Jev bills **input tokens**, and a photo is about 4,400 of them whatever is asked about it (the eight
+questions add only a little). So the cost is, in effect, **the number of photos sent**. What the
+code does about it:
+
+| Measure | Saving |
+|---|---|
+| **One request per photo, all three tiers in it.** The tier-2 and tier-3 questions ride along with tier 1 even when no animal turns out to be there, because a second request would send the photo again. | ~67% versus one request per tier |
+| **The label store (section 4.1).** A photo is never paid for twice with the same questions: re-runs, new photos added to a card, other output folders, retries after errors. | Re-running a sorted card: 100% |
+| **Probabilities are stored**, so thresholds and smoothing can be tuned without calls. | All tuning of the code side is free |
+| **Smoothing in code** instead of sending neighbouring frames with each photo (tested earlier: about 5× the cost for no clear gain). | ~80% versus neighbouring frames |
+| **The camera banner is cropped off** before upload. | ~5% per photo |
+
+Ideas not yet done, because each needs live measurements first:
+
+- **Smaller images.** Tokens grow with pixel count. Halving each side would cut cost to about a
+  quarter, but small or distant animals at night may be missed. It needs a recorded comparison on
+  the dev set.
+- **Skipping near-identical frames.** A trail camera fires bursts of almost the same picture, and
+  one of them could stand in for the others. This risks missing an animal that enters
+  mid-burst.
+
+`--estimate` prints the cost of only the photos the store doesn't have yet.
+
+**Cost** at **4,401 tokens per photo** (measured on 1,338 photos with the current questions) and
+$0.042 per million tokens (`jev-1.14.0`, 2026-11-15): **about $0.18 per 1,000 new photos**, ~$0.94 for
+this 5,061-photo card. Photos already in the store cost nothing. `results.jsonl` records the real
+`input_tokens` of every photo sent.
+
+---
+
+## 6. How well it works
+
+Measured on 2026-11-18 (`jev-1.14.0`), replaying recorded answers through the production code.
+
+**Data:** photos from this card, labelled by eye (`tests/fixtures/`):
+
+- **dev (232 photos)**, for tuning;
+- **test (200 photos)**, drawn at random and labelled before Jev saw them, for the final check.
+
+Their labels predate the six-animal rules: moose, other animal, no animal (people are filed as no
+animal) or ambiguous (not scored). So they measure tiers 1 and 2, not dog, cougar or elk.
+
+| | dev | **test** |
+|---|---|---|
+| **Tier 1: animals detected** (moose, deer, raccoon, bird photos) | 148 / 148 | **114 / 114** |
+| Empty frames given an animal | 0 | **0** |
+| **Tier 2: moose labelled `moose`**, with smoothing | 85 / 87 | **107 / 112** |
+| …without smoothing | 78 / 87 | 97 / 112 |
+| Moose photos left out of every event | 0 | **0** |
+| Non-moose photos labelled `moose` | 0 | **0** |
+| "No animal" photos labelled `human` (the labels don't record people, so not scored) | 31 of 77 | — |
+| "Other animal" photos labelled `deer` (the other 15 `unidentified`, presumably the raccoon and bird photos) | 46 of 61 | — |
+| Tokens per photo | 4,401 | 4,401 |
+
+For comparison, the previous moose/not-moose version put 106 of the test set's 112 moose in its
+moose folder and 5 in a review folder. A first try at this version, with a yes/no moose question,
+found only 70 of dev's 87 (section 1.1).
+
+**The 5 test moose not labelled moose:**
+
+- one is `unidentified`;
+- four are labelled `deer`. All four are a moose walking away from the camera at night, the known
+  weak spot: from behind, its pale legs and light rump look like a deer's, and Jev says "deer"
+  with P(moose) ≤ 0.14, too low for smoothing.
+- **All five stay in an event with the moose.** No moose activity is lost; tier 1 keeps every
+  frame.
+- **The cost is in the name:** the event becomes `moose-deer` instead of `moose`. On the recorded
+  test photos, 2 of the 4 events with a moose were named `moose-deer` for this reason. A whole card
+  will show more, since the replay only sees recorded photos.
+
+**Not measured:** dog, cougar and elk (this card has none labelled), and `human` against people
+labels (only spot-checked through the old "no animal" photos). Photos labelled for all six animals
+are needed for that.
+
+**Possible next step for the `moose-deer` names:** an event-level rule, e.g. "a deer frame inside an
+event that is otherwise all moose, with no frame where deer is the clear top species…". That
+needs fresh labelled photos to validate, since tuning it on these would just fit these few
+sequences.
+
+To re-measure after changing questions (live, budget-guarded):
 
 ```sh
-uv run pytest              # 100 tests, ~5 s, never calls the API
-uv run python tests/replay.py   # accuracy table for every recorded setup
+uv run python scripts/experiment.py dev --estimate
+uv run python scripts/experiment.py dev            # and devnb (neighbouring frames, for smoothing)
+uv run python tests/replay.py                      # free
 ```
 
-- Every test runs against a **fake API**. `tests/conftest.py` swaps the SDK's network layer for every
-  client, so no test can reach TypeSafe or use your key.
-- **Offline coverage:**
-  - the decision table, anatomy rescue and threshold edges;
-  - static and rolling events;
-  - neighbour selection (never across events);
-  - exactly what is sent (one image, the questions in both option orders, banner crop, no GPS);
-  - every smoothing guard, and the check folder;
-  - API errors that are never sorted;
-  - the cost estimate, which sends nothing;
-  - the folder tree, symlinks, `events.csv` and `results.jsonl`;
-  - the spending guard.
-- **Replay** (`tests/test_recorded.py` with `tests/replay.py`):
-  - Jev's recorded answers for all 432 labelled photos, plus their unlabelled neighbouring frames, are
-    run through the **production** code (`result_from_answers`, `smooth`);
-  - it checks the accuracy baselines above, **0 hard misses**, **no false moose**, no real deer in the
-    check folder on dev, and that no person reaches an animal folder;
-  - it also checks that the recordings asked exactly the questions production asks today (against
-    `tests/fixtures/experiments/questions_used.json`);
-  - so changing a threshold, `decide()` or `smooth()` is measured for free, while changing a question's
-    wording needs new recordings.
-- **New experiments** use `scripts/experiment.py` (live, budget-guarded) and `scripts/score.py`
-  (free). Tune on `dev` only. The `test` set has been used once; label a fresh random sample before
-  making further claims.
-  ```sh
-  uv run python scripts/experiment.py dev B_nobanner --estimate   # cost only
-  uv run python scripts/experiment.py dev B_nobanner --run 3      # a new live run
-  uv run python scripts/score.py dev B_nobanner --misses
-  ```
-- **Spending guard** (`pythonproject.budget`):
-  - every experiment request is logged to `.typesafe_spend.jsonl`;
-  - requests are refused before they're sent once the ledger plus in-flight requests would pass the cap
-    (`TYPESAFE_BUDGET_USD`, default $2.00);
-  - the production CLI is not capped; use `--estimate` instead.
+`tests/test_recorded.py` holds these results as baselines. Tune on `dev`; the `test` set has now been
+used once for this question set.
+
+---
+
+## 7. Testing without spending money
+
+```sh
+uv run pytest                       # never calls the API
+uv run python tests/replay.py       # scores recorded answers, once there are recordings
+```
+
+- Every test runs against a **fake API**. `tests/conftest.py` swaps the SDK's network layer for
+  every client, so no test can reach TypeSafe or use your key.
+- **Covered offline:**
+  - the three-tier truth table, including the 0.3/0.7 edges;
+  - event grouping: the 10-minute gap, no maximum length, empty frames, naming and order;
+  - smoothing guards;
+  - the label store: content keys, invalidation when the questions change, no second call;
+  - exactly what is sent (one image, the three tiers of questions, banner crop, no GPS);
+  - API errors, which are never sorted;
+  - the folder tree, `unsure/` (links only, kept through export, symlink entries in the zip),
+    stale-link clean-up, `events.csv` and `results.jsonl`;
+  - XMP keywords (pixels and EXIF unchanged, foreign XMP left alone);
+  - export and zip;
+  - the config file.
+- **Replay** (`tests/test_recorded.py` with `tests/replay.py`): Jev's recorded answers for all 432
+  labelled photos, plus their unlabelled neighbouring frames, run through the production code. It
+  checks every animal is detected, the moose baselines above, and no false moose. Changing a
+  threshold or `smooth()` is measured for free; rewording a question makes the recordings stale
+  and the tests skip until it's re-recorded.

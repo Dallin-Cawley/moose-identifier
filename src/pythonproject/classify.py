@@ -1,100 +1,12 @@
-"""Turn Jev's answers into a folder with code-side rules, and prepare images for upload.
+"""Prepare photos for upload to Jev.
 
-The requests themselves are built by the identification strategies in identify.py.
+The requests are built in identify.py; answers become labels in labels.py.
 """
 
-from dataclasses import dataclass, field
-from enum import StrEnum
 from io import BytesIO
 from pathlib import Path
 
 from PIL import Image as PILImage, ImageChops, ImageOps, ImageStat
-
-from .questions import MOOSE, NO, YES
-
-
-class Category(StrEnum):
-    """Values are the folder paths inside an event folder."""
-
-    MOOSE = "animal/moose"
-    OTHER_ANIMAL = "animal/not_moose"
-    # "Not a moose" calls in an event that also has moose photos: the usual way a moose is missed
-    # (seen from behind for several frames). Set by identify.flag_for_review, never by decide().
-    CHECK_NOT_MOOSE = "animal/not_moose_check"
-    NO_ANIMAL = "no_animal"
-    UNSURE = "unsure"
-
-
-@dataclass(frozen=True)
-class Result:
-    path: Path
-    category: Category
-    animal: float   # P(an animal is present), from the `animal` Noul
-    moose: float    # P(species is moose): average of the two species Choices (both option orders)
-    species: str    # top species option of that average
-    model: str
-    input_tokens: int | None = None
-    features: dict[str, float] = field(default_factory=dict)  # moose-anatomy Nouls
-    smoothed: bool = False  # category changed by event smoothing (identify.smooth)
-
-
-def has_moose_features(features: dict[str, float]) -> bool:
-    """Observable moose anatomy: a shoulder hump plus pale long legs or a long overhanging muzzle."""
-    if not features:
-        return False
-    return features["f_hump"] > 0.5 and (features["f_pale_legs"] > YES or features["f_long_muzzle"] > 0.5)
-
-
-def read_answers(answers) -> tuple[float, dict[str, float], dict[str, float]]:
-    """(P(animal), averaged species probabilities, feature probabilities) from a response's answers."""
-    animal = answers["animal"].noul
-    orders = [answers[k].probabilities for k in ("species", "species_rev") if k in answers]
-    species = {opt: sum(o[opt] for o in orders) / len(orders) for opt in orders[0]}
-    features = {k: a.noul for k, a in answers.items() if k.startswith("f_")}
-    return animal, species, features
-
-
-def _read(p: float) -> bool | None:
-    """True = yes, False = no, None = unsettled."""
-    if p > YES:
-        return True
-    if p < NO:
-        return False
-    return None
-
-
-def _read_moose(moose: float, species: str) -> bool | None:
-    """True = moose is the top species; False = moose unlikely (< NO); None = plausible but not top."""
-    if species == MOOSE:
-        return True
-    if moose < NO:
-        return False
-    return None
-
-
-def decide(animal: float, moose: float, species: str, moose_features: bool = False) -> Category:
-    """Truth table over the judgments.
-
-    animal: P(animal present). moose: P(species is moose). species: the top species option.
-    moose_features: moose anatomy visible (has_moose_features). It never puts a photo in the
-    moose folder; it only stops a "not a moose" verdict, sending the photo to `unsure` instead.
-    """
-    match _read(animal), _read_moose(moose, species):
-        case None, _:
-            return Category.UNSURE  # animal unsettled
-        case True, True:
-            return Category.MOOSE
-        case True, False if moose_features:
-            return Category.UNSURE  # Jev says another species, but moose anatomy is visible
-        case True, False:
-            return Category.OTHER_ANIMAL
-        case True, None:
-            return Category.UNSURE  # moose plausible but not the top species
-        case False, _ if moose > YES:
-            return Category.UNSURE  # contradiction: no animal, yet strongly a moose
-        case False, _:
-            return Category.NO_ANIMAL
-
 
 # API image limits: each side 280..1568 px. Larger or smaller images are rejected, not resized.
 MAX_SIDE = 1568

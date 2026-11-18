@@ -3,23 +3,28 @@
 import csv
 import json
 import sys
+import zipfile
 from datetime import datetime, timedelta
+from io import BytesIO
 
 import httpx2
 import pytest
+from PIL import Image as PILImage
 
 import pythonproject
 from conftest import answer
 from pythonproject.classify import prepare_image
+from pythonproject.xmp import source_size
 
 T0 = datetime(2024, 10, 30, 16, 28, 4)
 
-def by_photo(table: dict[bytes, tuple[float, float]]):
+
+def by_photo(table: dict[bytes, dict[str, float]]):
     def respond(req):
         [data] = req.assets.values()
         if data not in table:
             return httpx2.Response(500, json={"error": {"message": "unknown photo"}})
-        return answer(*table[data])
+        return answer(**table[data])
     return respond
 
 
@@ -51,62 +56,89 @@ def key_file(tmp_path):
     return p
 
 
+def make_scene(make_photo, fake_api, folder, spec):
+    """spec: name -> (minutes after T0, answer() arguments). Distinct colours = distinct bytes."""
+    table = {}
+    for i, (name, (m, probs)) in enumerate(spec.items()):
+        p = make_photo(name, T0 + timedelta(minutes=m), folder=folder, color=(i * 40 % 256, 100, 60))
+        table[prepare_image(p, crop_banner=True)] = probs
+    fake_api.respond = by_photo(table)
+    return folder
+
+
+# Three events: a moose with a deer, 11 minutes without an animal, a moose alone, then a person
+# with a dog. The empty frame and the blurry one (Jev unsure about an elk) are dropped.
+SCENE = {
+    "moose1.jpg": (0, {"animal": 0.95, "moose": 0.95}),
+    "deer.jpg": (3, {"animal": 0.93, "moose": 0.05, "deer": 0.93}),
+    "empty.jpg": (9, {}),
+    "moose2.jpg": (14, {"animal": 0.97, "moose": 0.97}),
+    "blurry.jpg": (16, {"animal": 0.5, "elk": 0.5}),
+    "walker.jpg": (40, {"animal": 0.9, "human": 0.9, "dog": 0.85}),
+}
+MIXED, MOOSE, OTHER = "2024-10-30_162804_moose-deer", "2024-10-30_164204_moose", "2024-10-30_170804_human-dog"
+LINKED = 4                                               # photos placed in events
+REPORTS = ["events.csv", "labels.jsonl", "results.jsonl"]
+
+
 @pytest.fixture
 def scene(make_photo, tmp_path, fake_api):
-    """5 photos across two static windows; one photo has no answer configured (API error)."""
-    spec = {  # name: (minutes after T0, animal, moose)
-        "moose1.jpg": (0, 0.95, 0.92),
-        "deer.jpg": (3, 0.93, 0.04),
-        "empty.jpg": (9, 0.02, 0.03),
-        "blurry.jpg": (12, 0.55, 0.40),
-        "moose2.jpg": (14, 0.97, 0.95),
-    }
-    table = {}
-    for i, (name, (m, a, mo)) in enumerate(spec.items()):
-        p = make_photo(name, T0 + timedelta(minutes=m), color=(i * 40, 100, 60))  # distinct bytes
-        table[prepare_image(p, crop_banner=True)] = (a, mo)
-    fake_api.respond = by_photo(table)
-    return tmp_path / "photos"
+    return make_scene(make_photo, fake_api, tmp_path / "photos", SCENE)
 
 
 def tree(out):
     return sorted(str(p.relative_to(out)) for p in out.rglob("*") if p.is_symlink())
 
 
-def test_static_layout(scene, tmp_path, key_file):
+def files_in(out):
+    """Regular files (not symlinks) under out, relative paths."""
+    return sorted(str(p.relative_to(out)) for p in out.rglob("*") if p.is_file() and not p.is_symlink())
+
+
+def keywords_in(path):
+    """dc:subject keywords of a file, parsed from its XMP packet as a photo app would."""
+    import re
+    import xml.etree.ElementTree as ET
+    data = path.read_bytes() if hasattr(path, "read_bytes") else path
+    m = re.search(rb"<x:xmpmeta.*?</x:xmpmeta>", data, re.S)
+    if not m:
+        return []
+    root = ET.fromstring(m.group(0))
+    rdf, dc = "{http://www.w3.org/1999/02/22-rdf-syntax-ns#}", "{http://purl.org/dc/elements/1.1/}"
+    return [li.text for li in root.iter(f"{rdf}li") if li in list(root.iter(f"{dc}subject"))[0].iter()]
+
+
+# --- events and labels -----------------------------------------------------------------------------
+
+def test_layout(scene, tmp_path, key_file):
     out = tmp_path / "out"
     assert run_cli(scene, "-o", out, "--api-key-file", key_file) == 0
-    assert tree(out) == [
-        "event_0000_2024-10-30_162804/animal/moose/moose1.jpg",
-        "event_0000_2024-10-30_162804/animal/not_moose_check/deer.jpg",  # same event as a moose
-        "event_0000_2024-10-30_162804/no_animal/empty.jpg",
-        "event_0001_2024-10-30_163804/animal/moose/moose2.jpg",
-        "event_0001_2024-10-30_163804/unsure/blurry.jpg",
-    ]
-    link = out / "event_0000_2024-10-30_162804/animal/moose/moose1.jpg"
-    assert link.resolve() == (scene / "moose1.jpg").resolve()
+    assert tree(out) == [f"{MIXED}/deer.jpg", f"{MIXED}/moose1.jpg", f"{MOOSE}/moose2.jpg",
+                         f"{OTHER}/walker.jpg"]
+    assert (out / MIXED / "moose1.jpg").resolve() == (scene / "moose1.jpg").resolve()
+    assert sorted(files_in(out)) == REPORTS
 
 
-def test_rolling_layout(scene, tmp_path, key_file):
-    out = tmp_path / "out"
-    assert run_cli(scene, "-o", out, "-e", "rolling", "--api-key-file", key_file) == 0
-    # rolling: minute 12 is outside [0, 10), so a new event starts at 16:40:04
-    assert {p.split("/")[0] for p in tree(out)} == {
-        "event_0000_2024-10-30_162804", "event_0001_2024-10-30_164004"}
-
-
-def test_events_csv_and_results_jsonl(scene, tmp_path, key_file):
+def test_events_csv(scene, tmp_path, key_file):
     out = tmp_path / "out"
     run_cli(scene, "-o", out, "--api-key-file", key_file)
     rows = list(csv.DictReader(open(out / "events.csv")))
-    assert [r["folder"] for r in rows] == ["event_0000_2024-10-30_162804", "event_0001_2024-10-30_163804"]
-    assert {k: rows[0][k] for k in ("moose", "not_moose", "not_moose_check", "no_animal", "unsure", "errors")} == {
-        "moose": "1", "not_moose": "0", "not_moose_check": "1", "no_animal": "1", "unsure": "0", "errors": "0"}
+    assert [(r["folder"], r["name"], r["type"], r["photos"]) for r in rows] == [
+        (MIXED, "moose-deer", "mixed", "2"), (MOOSE, "moose", "moose", "1"), (OTHER, "human-dog", "other", "1")]
+    assert {a: rows[0][a] for a in ("human", "dog", "cougar", "deer", "elk", "moose")} == {
+        "human": "0", "dog": "0", "cougar": "0", "deer": "1", "elk": "0", "moose": "1"}
+    assert (rows[0]["start"], rows[0]["end"]) == ("2024-10-30T16:28:04", "2024-10-30T16:31:04")
 
-    lines = [json.loads(l) for l in open(out / "results.jsonl")]
-    assert len(lines) == 5
-    assert set(lines[0]) >= {"path", "event", "event_folder", "event_start", "strategy",
-                             "category", "animal", "moose", "species", "model", "input_tokens"}
+
+def test_results_jsonl_lists_every_photo(scene, tmp_path, key_file):
+    out = tmp_path / "out"
+    run_cli(scene, "-o", out, "--api-key-file", key_file)
+    lines = {json.loads(l)["path"].rsplit("/", 1)[1]: json.loads(l) for l in open(out / "results.jsonl")}
+    assert len(lines) == 6
+    assert lines["walker.jpg"]["labels"] == ["human", "dog"] and lines["walker.jpg"]["event"] == "human-dog"
+    assert lines["empty.jpg"]["labels"] == ["no_animal"] and lines["empty.jpg"]["event_folder"] is None
+    assert lines["blurry.jpg"]["labels"] == ["no_animal"] and lines["blurry.jpg"]["probabilities"]["elk"] == 0.5
+    assert set(lines["moose1.jpg"]) >= {"taken", "probabilities", "smoothed", "cached", "model", "input_tokens"}
 
 
 def test_api_failure_is_not_sorted_and_exits_1(scene, tmp_path, key_file, make_photo):
@@ -114,8 +146,7 @@ def test_api_failure_is_not_sorted_and_exits_1(scene, tmp_path, key_file, make_p
     out = tmp_path / "out"
     assert run_cli(scene, "-o", out, "--api-key-file", key_file) == 1
     assert not any("unknown" in p for p in tree(out))
-    rows = list(csv.DictReader(open(out / "events.csv")))
-    assert rows[0]["errors"] == "1"
+    assert len(tree(out)) == LINKED
 
 
 def test_missing_timestamp_is_error(scene, tmp_path, key_file, make_photo):
@@ -133,7 +164,8 @@ def test_rerun_is_idempotent(scene, tmp_path, key_file):
     assert tree(out) == first
 
 
-def test_name_collision_gets_suffix(make_photo, tmp_path, key_file):
+def test_name_collision_gets_suffix(make_photo, tmp_path, key_file, fake_api):
+    fake_api.respond = lambda req: answer(animal=0.9, moose=0.9)
     a = make_photo("same.jpg", T0, folder=tmp_path / "a")
     b = make_photo("same.jpg", T0 + timedelta(minutes=1), folder=tmp_path / "b", color=(1, 2, 3))
     out = tmp_path / "out"
@@ -145,9 +177,9 @@ def test_name_collision_gets_suffix(make_photo, tmp_path, key_file):
 def test_output_dir_inside_input_is_not_rescanned(scene, key_file, fake_api):
     out = scene / "sorted"
     run_cli(scene, "-o", out, "--api-key-file", key_file)
-    n = len(fake_api.requests)
+    first = tree(out)
     run_cli(scene, "-o", out, "--api-key-file", key_file)
-    assert len(fake_api.requests) == 2 * n  # same photos again, not the links
+    assert tree(out) == first                            # the links weren't sorted as new photos
 
 
 def test_dry_run_writes_nothing(scene, tmp_path, key_file):
@@ -155,6 +187,147 @@ def test_dry_run_writes_nothing(scene, tmp_path, key_file):
     assert run_cli(scene, "-o", out, "-n", "--api-key-file", key_file) == 0
     assert not out.exists()
 
+
+# --- the label store: Jev is called once per photo ----------------------------------------------
+
+def test_second_run_sends_nothing_and_needs_no_key(scene, tmp_path, key_file, fake_api, no_default_key):
+    out = tmp_path / "out"
+    run_cli(scene, "-o", out, "--api-key-file", key_file)
+    assert len(fake_api.requests) == 6
+    assert run_cli(scene, "-o", out) == 0                # every photo cached: no key asked for
+    assert len(fake_api.requests) == 6
+    lines = [json.loads(l) for l in open(out / "results.jsonl")]
+    assert all(l["cached"] and l["input_tokens"] is None for l in lines)
+    assert len(tree(out)) == LINKED
+
+
+def test_only_new_photos_are_sent(scene, tmp_path, key_file, fake_api, make_photo, capsys):
+    out = tmp_path / "out"
+    run_cli(scene, "-o", out, "--api-key-file", key_file)
+    make_photo("new.jpg", T0 + timedelta(minutes=50), folder=scene, color=(9, 9, 9))
+    capsys.readouterr()
+    run_cli(scene, "-o", out, "--estimate")
+    err = capsys.readouterr().err
+    assert "6 already labelled" in err and "1 image(s) to send" in err
+    run_cli(scene, "-o", out, "--api-key-file", key_file)
+    assert len(fake_api.requests) == 7                   # only new.jpg (it gets a 500: unknown photo)
+
+
+def test_labels_can_be_shared_between_output_folders(scene, tmp_path, key_file, fake_api):
+    store = tmp_path / "card" / "labels.jsonl"
+    run_cli(scene, "-o", tmp_path / "a", "--labels", store, "--api-key-file", key_file)
+    run_cli(scene, "-o", tmp_path / "b", "--labels", store, "--api-key-file", key_file)
+    assert len(fake_api.requests) == 6 and store.is_file()
+    assert tree(tmp_path / "a") == tree(tmp_path / "b")
+
+
+def test_changed_questions_relabel_and_move_photos(scene, tmp_path, key_file, fake_api, monkeypatch):
+    out = tmp_path / "out"
+    run_cli(scene, "-o", out, "--api-key-file", key_file)
+    # new wording: the deer turns out to be an elk. Every photo is asked again, and the old folder goes.
+    import pythonproject.labels as L
+    monkeypatch.setattr(L, "questions_fingerprint", lambda: "new-wording")
+    table = {prepare_image(scene / n, crop_banner=True): p for n, (_, p) in SCENE.items()}
+    table[prepare_image(scene / "deer.jpg", crop_banner=True)] = {"animal": 0.93, "moose": 0.05, "elk": 0.9}
+    fake_api.respond = by_photo(table)
+    assert run_cli(scene, "-o", out, "--api-key-file", key_file) == 0
+    assert len(fake_api.requests) == 12
+    assert "2024-10-30_162804_moose-elk/deer.jpg" in tree(out)
+    assert not (out / MIXED).exists()
+
+
+def test_estimate_prints_cost_and_sends_nothing(scene, tmp_path, fake_api, capsys):
+    rc = run_cli(scene, "-o", tmp_path / "out", "--estimate", "--api-key-file", tmp_path / "missing")
+    assert rc == 0 and fake_api.requests == []          # no key needed, nothing sent
+    err = capsys.readouterr().err
+    assert "6 image(s) to send, estimated $" in err
+    assert not (tmp_path / "out").exists()
+
+
+# --- smoothing -----------------------------------------------------------------------------------
+
+@pytest.fixture
+def walkaway(make_photo, tmp_path, fake_api):
+    """A moose, then the same moose from behind twice: Jev is sure of an animal, but calls it a deer
+    (P(moose) 0.3, not the top option)."""
+    return make_scene(make_photo, fake_api, tmp_path / "walk", {
+        "a.jpg": (0, {"animal": 0.95, "moose": 0.95}),
+        "b.jpg": (1, {"animal": 0.95, "moose": 0.3}),
+        "c.jpg": (2, {"animal": 0.95, "moose": 0.3}),   # next to b, which is only unsettled: no chain
+    })
+
+
+def labels_of(out):
+    return {json.loads(l)["path"].rsplit("/", 1)[1]: json.loads(l) for l in open(out / "results.jsonl")}
+
+
+def test_smoothing_confirms_moose_next_to_moose(walkaway, tmp_path, key_file):
+    out = tmp_path / "out"
+    assert run_cli(walkaway, "-o", out, "--api-key-file", key_file) == 0
+    # all three are animals, so all stay in the event; only b becomes moose; c is recorded as unsure
+    assert tree(out) == [f"2024-10-30_162804_moose/{n}.jpg" for n in "abc"] + ["unsure/c.jpg"]
+    lines = labels_of(out)
+    assert [lines[n]["labels"] for n in ("a.jpg", "b.jpg", "c.jpg")] == [["moose"], ["moose"], ["unidentified"]]
+    assert lines["b.jpg"]["smoothed"] == ["moose"] and lines["a.jpg"]["smoothed"] == []
+
+
+def test_no_smooth_flag(walkaway, tmp_path, key_file):
+    out = tmp_path / "out"
+    run_cli(walkaway, "-o", out, "--no-smooth", "--api-key-file", key_file)
+    assert tree(out) == [f"2024-10-30_162804_moose/{n}.jpg" for n in "abc"] + ["unsure/b.jpg", "unsure/c.jpg"]
+    assert labels_of(out)["b.jpg"]["labels"] == ["unidentified"] and labels_of(out)["b.jpg"]["unsure"]
+
+
+def test_event_of_only_unidentified_animals(make_photo, tmp_path, key_file, fake_api):
+    fake_api.respond = lambda req: answer(animal=0.95, moose=0.02)   # e.g. a raccoon
+    make_photo("raccoon.jpg", T0, folder=tmp_path / "r")
+    out = tmp_path / "out"
+    assert run_cli(tmp_path / "r", "-o", out, "--api-key-file", key_file) == 0
+    assert tree(out) == ["2024-10-30_162804_unidentified/raccoon.jpg", "unsure/raccoon.jpg"]
+    [row] = csv.DictReader(open(out / "events.csv"))
+    assert (row["type"], row["unidentified"]) == ("other", "1")
+
+
+# --- unsure/: a record of photos with an animal Jev couldn't identify ------------------------------
+
+def test_unsure_links_survive_export_and_point_to_originals(walkaway, tmp_path, key_file):
+    out = tmp_path / "out"
+    assert run_cli(walkaway, "-o", out, "--api-key-file", key_file, "--resolve-links") == 0
+    assert tree(out) == ["unsure/c.jpg"]                           # the only symlink left
+    assert (out / "unsure/c.jpg").resolve() == (walkaway / "c.jpg").resolve()
+    copy = out / "2024-10-30_162804_moose/c.jpg"                   # the photo is still in its event
+    assert copy.is_file() and not copy.is_symlink() and keywords_in(copy) == ["unidentified"]
+    assert run_cli("--export", out) == 0                           # exporting again leaves it alone
+    assert tree(out) == ["unsure/c.jpg"]
+
+
+def test_zip_stores_unsure_as_symlinks(walkaway, tmp_path, key_file):
+    out = tmp_path / "out"
+    assert run_cli(walkaway, "-o", out, "--api-key-file", key_file, "--zip") == 0
+    with zipfile.ZipFile(tmp_path / "out.zip") as zf:
+        info = zf.getinfo("out/unsure/c.jpg")
+        assert (info.external_attr >> 16) & 0o170000 == 0o120000   # a symlink entry
+        assert zf.read(info).decode() == str((walkaway / "c.jpg").resolve())
+        event_copy = zf.getinfo("out/2024-10-30_162804_moose/c.jpg")
+        assert (event_copy.external_attr >> 16) & 0o170000 != 0o120000          # a real photo
+        assert keywords_in(zf.read(event_copy)) == ["unidentified"]
+
+
+def test_identified_photo_leaves_unsure(walkaway, tmp_path, key_file):
+    out = tmp_path / "out"
+    run_cli(walkaway, "-o", out, "--no-smooth", "--api-key-file", key_file)
+    assert "unsure/b.jpg" in tree(out)
+    run_cli(walkaway, "-o", out, "--api-key-file", key_file)    # smoothing now makes b a moose
+    assert "unsure/b.jpg" not in tree(out) and "unsure/c.jpg" in tree(out)
+
+
+def test_no_unsure_folder_without_unsure_photos(scene, tmp_path, key_file):
+    out = tmp_path / "out"
+    run_cli(scene, "-o", out, "--api-key-file", key_file)
+    assert not (out / "unsure").exists()
+
+
+# --- API key -------------------------------------------------------------------------------------
 
 def test_api_key_from_file_is_sent(scene, tmp_path, fake_api, monkeypatch):
     # bypass the fixture's key override to see what the CLI passes
@@ -174,52 +347,6 @@ def test_api_key_from_file_is_sent(scene, tmp_path, fake_api, monkeypatch):
 
 def test_no_api_key_is_usage_error(scene, tmp_path):
     assert run_cli(scene, "-o", tmp_path / "out", "--api-key-file", tmp_path / "missing") == 2
-
-
-# --- identification strategy, cost estimate and smoothing ---------------------------------------
-
-def test_estimate_prints_cost_and_sends_nothing(scene, tmp_path, fake_api, capsys):
-    rc = run_cli(scene, "-o", tmp_path / "out", "--estimate", "--api-key-file", tmp_path / "missing")
-    assert rc == 0 and fake_api.requests == []          # no key needed, nothing sent
-    err = capsys.readouterr().err
-    assert "5 image(s) to send, estimated $" in err
-    assert not (tmp_path / "out").exists()
-
-
-@pytest.fixture
-def walkaway(make_photo, tmp_path, fake_api):
-    """Moose, then the same moose from behind (Jev: deer, P(moose) 0.2), then moose again."""
-    spec = {"a.jpg": (0, 0.97, 0.9), "b.jpg": (1, 0.97, 0.2), "c.jpg": (2, 0.97, 0.9)}
-    table = {}
-    for i, (name, (m, a, mo)) in enumerate(spec.items()):
-        p = make_photo(name, T0 + timedelta(minutes=m), folder=tmp_path / "walk", color=(i * 70, 50, 50))
-        table[prepare_image(p, crop_banner=True)] = (a, mo)
-    fake_api.respond = by_photo(table)
-    return tmp_path / "walk"
-
-
-def test_smoothing_promotes_frame_between_moose(walkaway, tmp_path, key_file):
-    out = tmp_path / "out"
-    assert run_cli(walkaway, "-o", out, "--api-key-file", key_file) == 0
-    assert tree(out) == [f"event_0000_2024-10-30_162804/animal/moose/{n}.jpg" for n in "abc"]
-    lines = {json.loads(l)["path"].rsplit("/", 1)[1]: json.loads(l) for l in open(out / "results.jsonl")}
-    assert lines["b.jpg"]["smoothed"] is True and lines["a.jpg"]["smoothed"] is False
-
-
-def test_no_smooth_flag(walkaway, tmp_path, key_file):
-    out = tmp_path / "out"
-    run_cli(walkaway, "-o", out, "--no-smooth", "--api-key-file", key_file)
-    # not smoothed, so it stays "not a moose", but in the check folder: its event has moose photos
-    assert "event_0000_2024-10-30_162804/animal/not_moose_check/b.jpg" in tree(out)
-
-
-def test_deer_in_an_event_without_moose_stays_in_not_moose(make_photo, tmp_path, key_file, fake_api):
-    fake_api.respond = lambda req: answer(0.96, 0.03)
-    make_photo("deer1.jpg", T0, folder=tmp_path / "d")
-    make_photo("deer2.jpg", T0 + timedelta(minutes=1), folder=tmp_path / "d", color=(1, 2, 3))
-    out = tmp_path / "out"
-    assert run_cli(tmp_path / "d", "-o", out, "--api-key-file", key_file) == 0
-    assert tree(out) == [f"event_0000_2024-10-30_162804/animal/not_moose/deer{i}.jpg" for i in (1, 2)]
 
 
 def test_placeholder_key_counts_as_no_key(scene, tmp_path, monkeypatch):
@@ -310,21 +437,23 @@ def test_no_prompt_when_not_interactive(scene, tmp_path, fake_api, no_default_ke
     assert fake_api.requests == []
 
 
-# --- resolving links and zipping the output -------------------------------------------------------
+# --- resolving links, keywords and zipping the output ----------------------------------------------
 
-def files_in(out):
-    """Regular files (not symlinks) under out, relative paths."""
-    return sorted(str(p.relative_to(out)) for p in out.rglob("*") if p.is_file() and not p.is_symlink())
-
-
-def test_resolve_links_copies_originals_in_place(scene, tmp_path, key_file):
+def test_resolve_links_copies_originals_with_keywords(scene, tmp_path, key_file):
     out = tmp_path / "out"
+    original = (scene / "walker.jpg").read_bytes()
     assert run_cli(scene, "-o", out, "--api-key-file", key_file, "--resolve-links") == 0
     assert tree(out) == []                                    # no symlinks left
-    moose = out / "event_0000_2024-10-30_162804/animal/moose/moose1.jpg"
-    assert moose.read_bytes() == (scene / "moose1.jpg").read_bytes()
-    assert (scene / "moose1.jpg").is_file() and not (scene / "moose1.jpg").is_symlink()  # original untouched
-    assert {"results.jsonl", "events.csv"} <= set(files_in(out))
+    copy = out / OTHER / "walker.jpg"
+    assert keywords_in(copy) == ["human", "dog"]
+    assert keywords_in(out / MIXED / "deer.jpg") == ["deer"]
+    with PILImage.open(copy) as a, PILImage.open(scene / "walker.jpg") as b:
+        assert a.tobytes() == b.tobytes()                     # same pixels: the image wasn't re-encoded
+        assert a.getexif().get_ifd(0x8769)[0x9003] == "2024:10:30 17:08:04"   # camera EXIF kept
+    assert source_size(copy) == len(original)
+    assert (scene / "walker.jpg").read_bytes() == original    # original untouched
+    assert copy.stat().st_mtime_ns == (scene / "walker.jpg").stat().st_mtime_ns
+    assert set(REPORTS) <= set(files_in(out))
 
 
 def test_resolve_existing_output_without_inputs_sends_nothing(scene, tmp_path, key_file, fake_api):
@@ -335,6 +464,7 @@ def test_resolve_existing_output_without_inputs_sends_nothing(scene, tmp_path, k
     assert run_cli("-o", out, "--resolve-links") == 0         # no inputs, no key needed
     assert len(fake_api.requests) == sent
     assert tree(out) == [] and set(links) <= set(files_in(out))
+    assert keywords_in(out / MOOSE / "moose2.jpg") == ["moose"]
     assert run_cli("-o", out, "--resolve-links") == 0         # running again is a no-op
 
 
@@ -343,26 +473,32 @@ def test_rerun_after_resolving_does_not_duplicate(scene, tmp_path, key_file):
     run_cli(scene, "-o", out, "--api-key-file", key_file, "--resolve-links")
     before = files_in(out)
     run_cli(scene, "-o", out, "--api-key-file", key_file)
-    assert tree(out) == [] and files_in(out) == before        # no STC-<hash> duplicates or new links
+    assert tree(out) == [] and files_in(out) == before        # tagged copies still count as placed
 
 
-def test_zip_contains_resolved_tree(scene, tmp_path, key_file):
-    import zipfile
+def test_missing_labels_copy_without_keywords(scene, tmp_path, key_file, capsys):
+    out = tmp_path / "out"
+    run_cli(scene, "-o", out, "--api-key-file", key_file)
+    (out / "labels.jsonl").unlink()
+    assert run_cli("-o", out, "--resolve-links") == 0
+    assert (out / MOOSE / "moose2.jpg").read_bytes() == (scene / "moose2.jpg").read_bytes()
+    assert "no labels known for moose2.jpg" in capsys.readouterr().err
+
+
+def test_zip_contains_tagged_tree(scene, tmp_path, key_file):
     out = tmp_path / "out"
     assert run_cli(scene, "-o", out, "--api-key-file", key_file, "--zip") == 0
     zpath = tmp_path / "out.zip"
     with zipfile.ZipFile(zpath) as zf:
         names = sorted(zf.namelist())
-        assert "out/results.jsonl" in names and "out/events.csv" in names
-        assert "out/event_0000_2024-10-30_162804/animal/moose/moose1.jpg" in names
-        data = zf.read("out/event_0000_2024-10-30_162804/animal/moose/moose1.jpg")
-    assert data == (scene / "moose1.jpg").read_bytes()
+        assert {f"out/{r}" for r in REPORTS} <= set(names)
+        data = zf.read(f"out/{MIXED}/moose1.jpg")
+    assert keywords_in(data) == ["moose"]
     assert len(names) == len(files_in(out))
     assert not zpath.with_name("out.zip.partial").exists()
 
 
 def test_zip_path_inside_output_is_not_zipped_into_itself(scene, tmp_path, key_file):
-    import zipfile
     out = tmp_path / "out"
     run_cli(scene, "-o", out, "--api-key-file", key_file)
     zpath = out / "share.zip"
@@ -378,7 +514,7 @@ def test_broken_link_is_reported_and_not_zipped(scene, tmp_path, key_file):
     (scene / "deer.jpg").unlink()
     assert run_cli("-o", out, "--zip") == 1
     assert not (tmp_path / "out.zip").exists()
-    assert tree(out) == ["event_0000_2024-10-30_162804/animal/not_moose_check/deer.jpg"]
+    assert tree(out) == [f"{MIXED}/deer.jpg"]
 
 
 def test_export_option_errors(scene, tmp_path, key_file, fake_api):
@@ -413,22 +549,30 @@ def test_export_resolves_without_api_or_key(earlier_run, fake_api, tmp_path, no_
     out, sent = earlier_run
     assert run_cli("--export", out) == 0
     assert len(fake_api.requests) == sent
-    assert tree(out) == [] and len(files_in(out)) == 5 + 2
+    assert tree(out) == [] and len(files_in(out)) == LINKED + len(REPORTS)
+    assert keywords_in(out / OTHER / "walker.jpg") == ["human", "dog"]
     assert not (tmp_path / "results.zip").exists()      # zipping is opt-in
 
 
 def test_export_with_zip(earlier_run, tmp_path):
-    import zipfile
     out, _ = earlier_run
     assert run_cli("--export", out, "--zip") == 0
     with zipfile.ZipFile(tmp_path / "results.zip") as zf:
-        assert "results/event_0000_2024-10-30_162804/animal/moose/moose1.jpg" in zf.namelist()
+        assert f"results/{MOOSE}/moose2.jpg" in zf.namelist()
 
 
 def test_export_with_zip_path(earlier_run, tmp_path):
     out, _ = earlier_run
     assert run_cli("--export", out, "--zip-path", tmp_path / "share" / "x.zip") == 0
     assert (tmp_path / "share" / "x.zip").is_file()
+
+
+def test_export_with_shared_label_store(scene, tmp_path, key_file):
+    store = tmp_path / "labels.jsonl"
+    out = tmp_path / "results"
+    run_cli(scene, "-o", out, "--labels", store, "--api-key-file", key_file)
+    assert run_cli("--export", out, "--labels", store) == 0
+    assert keywords_in(out / MOOSE / "moose2.jpg") == ["moose"]
 
 
 def test_export_takes_precedence_over_out(earlier_run, tmp_path):
@@ -444,4 +588,4 @@ def test_export_errors(earlier_run, scene, tmp_path, fake_api):
     assert run_cli("--export", out, "--estimate") == 2
     assert run_cli("--export", out, "--dry-run") == 2
     assert len(fake_api.requests) == sent
-    assert len(tree(out)) == 5                           # nothing was resolved by the failed calls
+    assert len(tree(out)) == LINKED                      # nothing was resolved by the failed calls

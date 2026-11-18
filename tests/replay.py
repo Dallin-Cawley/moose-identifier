@@ -1,134 +1,112 @@
 """Replay recorded Jev answers through the production code. No API calls.
 
-    uv run python tests/replay.py          # print the accuracy table for every recorded configuration
+    uv run python tests/replay.py          # print the accuracy table for every recorded run
 
-Recordings are raw answers saved by scripts/experiment.py in tests/fixtures/experiments/.
-Arm B_nobanner asked exactly the production questions (checked by test_recorded.py against
-questions_used.json), on banner-cropped photos. The dropped `neighbours` experiment (arm E_nb2) can
-still be scored with scripts/score.py.
+Recordings are made by scripts/experiment.py (arm `labels`, the production questions) and saved in
+tests/fixtures/experiments/<set>__labels__run<n>.json with each photo's capture time.
+
+The labelled sets predate the six-animal rules: each photo is labelled animal/moose,
+animal/not_moose, no_animal or ambiguous, and no_animal includes photos of people. So the scores
+here cover tier 1 (is an animal detected?) and tier 2 (is a moose labelled moose?), plus a check
+that empty frames don't get a (non-human) animal. Tier 3 (dog, cougar, elk, human) can't be scored
+with these labels.
 """
 
 import csv
 import json
-from functools import cache
+from datetime import datetime
 from pathlib import Path
 
 from typesafe_sdk import ChoiceAnswer, NoulAnswer
 
-from pythonproject import find_images, group_into_events
-from pythonproject.classify import Category, Result
-from pythonproject.events import StaticWindows
-from pythonproject.identify import find_neighbours, flag_for_review, result_from_answers, smooth
+from pythonproject.identify import labels_from_answers, smooth
+from pythonproject.labels import Labels
+from pythonproject.questions import HUMAN, MOOSE, questions_fingerprint
 
 ROOT = Path(__file__).resolve().parent.parent
 FIX = ROOT / "tests" / "fixtures"
 EXP = FIX / "experiments"
-IMAGES = ROOT / "src" / "images"
 LABELS = {"dev": FIX / "dev_labels.csv", "test": FIX / "test_labels.csv"}
-# production strategy -> (recorded arm, which recorded question plays production's `animal`)
-ARMS = {"single": ("B_nobanner", "animal")}
+ARM = "labels"
 
 
 def labels(set_name: str) -> dict[str, str]:
     return {r["photo"]: r["expected"] for r in csv.DictReader(open(LABELS[set_name]))}
 
 
-def recording(set_name: str, arm: str, run: int = 1) -> dict | None:
-    f = EXP / f"{set_name}__{arm}__run{run}.json"
-    return json.loads(f.read_text()) if f.exists() else None
+def recording(set_name: str, run: int = 1) -> dict | None:
+    """Raw recording, or None if absent or made with other question wording."""
+    f = EXP / f"{set_name}__{ARM}__run{run}.json"
+    if not f.exists():
+        return None
+    rec = json.loads(f.read_text())
+    if any(r.get("questions") != questions_fingerprint() for r in rec.values()):
+        return None
+    return rec
 
 
-def _answers(raw: dict, animal_q: str) -> dict:
-    out = {}
-    for qid, a in raw.items():
-        model = {"noul": NoulAnswer, "choice": ChoiceAnswer}.get(a["type"])
-        if model:
-            out[qid] = model.model_validate(a)
-    out["animal"] = out[animal_q]
+def results(set_name: str, run: int = 1, with_context: bool = True, smoothing: bool = True
+            ) -> dict[Path, Labels] | None:
+    """Production Labels for every recorded photo (plus unlabelled neighbours, for smoothing)."""
+    rec = recording(set_name, run)
+    if rec is None:
+        return None
+    if with_context and (ctx := recording(f"{set_name}nb", 1)):
+        rec = {**ctx, **rec}
+    model = {"noul": NoulAnswer, "choice": ChoiceAnswer}
+    out = {Path(p): labels_from_answers(Path(p), {k: model[a["type"]].model_validate(a)
+                                                  for k, a in r["answers"].items()},
+                                        r["model"], r["input_tokens"])
+           for p, r in rec.items()}
+    if smoothing:
+        timeline = sorted(((Path(p), datetime.fromisoformat(r["taken"])) for p, r in rec.items()),
+                          key=lambda pt: pt[1])
+        out = smooth(out, timeline)
     return out
 
 
-def results(set_name: str, strategy: str, run: int = 1, with_context: bool = False) -> dict[Path, Result] | None:
-    """Production Results for every recorded photo (and, with_context, its unlabelled neighbours)."""
-    arm, animal_q = ARMS[strategy]
-    rec = recording(set_name, arm, run)
-    if rec is None:
-        return None
-    if with_context:
-        ctx = recording(f"{set_name}nb", arm, 1)
-        if ctx is None:
-            return None
-        rec = {**ctx, **rec}
-    return {Path(p): result_from_answers(Path(p), _answers(r["answers"], animal_q), r["model"], r["input_tokens"])
-            for p, r in rec.items()}
-
-
-@cache
-def card_photos():
-    photos, _ = group_into_events(find_images([IMAGES], Path("/nonexistent")), StaticWindows())
-    return photos
-
-
-@cache
-def card_neighbours():
-    return {Path(p.name): v.__class__(tuple(Path(q.name) for q in v.before), tuple(Path(q.name) for q in v.after))
-            for p, v in find_neighbours(card_photos(), 1).items()}
-
-
-@cache
-def card_events():
-    return {Path(p.name): e for p, e in card_photos()}
-
-
-def smoothed(rs: dict[Path, Result]) -> dict[Path, Result]:
-    return smooth(rs, card_neighbours())
-
-
-def reviewed(rs: dict[Path, Result]) -> dict[Path, Result]:
-    """The check-folder pass. With replays, an event's moose are only seen among recorded photos."""
-    return flag_for_review(rs, card_events())
-
-
-def metrics(set_name: str, rs: dict[Path, Result]) -> dict:
+def metrics(set_name: str, rs: dict[Path, Labels]) -> dict:
+    """Scores per tier. Tier 1: is an animal detected? Tier 2: is a moose labelled moose?"""
     lab = labels(set_name)
-    pairs = [(e, rs[Path(p)].category.value) for p, e in lab.items() if e != "ambiguous" and Path(p) in rs]
-    moose = [g for e, g in pairs if e == "animal/moose"]
-    check = "animal/not_moose_check"
+    pairs = [(e, rs[Path(p)]) for p, e in lab.items() if e != "ambiguous" and Path(p) in rs]
+    moose = [r for e, r in pairs if e == "animal/moose"]
+    others = [r for e, r in pairs if e == "animal/not_moose"]
+    empty = [r for e, r in pairs if e == "no_animal"]          # includes photos of people
     return {
         "n": len(pairs),
-        # a real deer in the check folder counts as correct: it is still filed as "not a moose"
-        "correct": sum(e == g or (e == "animal/not_moose" and g == check) for e, g in pairs),
-        "check_folder": sum(g == check for _, g in pairs),
-        "check_moose": sum(g == check for g in moose),
+        # tier 1
+        "animal_found": sum(r.has_animal for r in moose + others),
+        "animal_total": len(moose + others),
+        "empty_given_animal": sum(r.has_animal and set(r.keywords) != {HUMAN} for r in empty),
+        # tier 2
         "moose_total": len(moose),
-        "moose_found": sum(g == "animal/moose" for g in moose),
-        "hard_miss": sum(g in ("animal/not_moose", "no_animal") for g in moose),
-        "moose_unsure": sum(g == "unsure" for g in moose),
-        "false_moose": sum(e != "animal/moose" and g == "animal/moose" for e, g in pairs),
-        "people_to_animal": sum(e == "no_animal" and g.startswith("animal/") for e, g in pairs),
-        "unsure": sum(g == "unsure" for _, g in pairs),
-        "wrong_folder": sum(g not in (e, "unsure", check) for e, g in pairs),
-        "tokens_per_photo": round(sum(r.input_tokens for p, r in rs.items() if p.name in lab) / max(1, sum(p.name in lab for p in rs))),
+        "moose_found": sum(MOOSE in r.animals for r in moose),
+        "moose_missed": sum(MOOSE not in r.animals for r in moose),
+        "moose_dropped": sum(not r.has_animal for r in moose),               # left out of every event
+        "moose_unidentified": sum(r.keywords == ("unidentified",) for r in moose),  # kept, unnamed
+        "moose_as_other": sum(MOOSE not in r.animals and bool(r.animals) for r in moose),
+        "false_moose": sum(MOOSE in r.animals for r in others + empty),
+        "tokens_per_photo": round(sum(rs[Path(p)].input_tokens or 0 for p in lab if Path(p) in rs)
+                                  / max(1, sum(Path(p) in rs for p in lab))),
     }
 
 
-def configurations(set_name: str, run: int = 1):
-    """(name, Results) for each configuration that has recordings."""
-    single = results(set_name, "single", run, with_context=True) or results(set_name, "single", run)
-    if single:
-        yield "single, no smoothing", reviewed(single)
-        if recording(f"{set_name}nb", "B_nobanner") and run == 1:
-            yield "single + smoothing", reviewed(smoothed(single))
-
-
 if __name__ == "__main__":
+    found = False
     for set_name in LABELS:
-        for run in (1, 2):
-            for name, rs in configurations(set_name, run):
+        for run in (1, 2, 3):
+            for smoothing in (False, True):
+                rs = results(set_name, run, smoothing=smoothing)
+                if rs is None:
+                    continue
+                found = True
                 m = metrics(set_name, rs)
-                print(f"{set_name:<4} run{run}  {name:<26} correct {m['correct']:>3}/{m['n']:<3} "
-                      f"moose found {m['moose_found']:>3}/{m['moose_total']:<3} hard-miss {m['hard_miss']:>2} "
-                      f"moose→unsure {m['moose_unsure']:>2} moose→check {m['check_moose']} "
-                      f"check folder {m['check_folder']:>2} false-moose {m['false_moose']} "
-                      f"people→animal {m['people_to_animal']} unsure {m['unsure']:>3} "
+                print(f"{set_name:<4} run{run} {'smoothed' if smoothing else 'raw':<8} "
+                      f"animal found {m['animal_found']:>3}/{m['animal_total']:<3} "
+                      f"empty→animal {m['empty_given_animal']} | "
+                      f"moose found {m['moose_found']:>3}/{m['moose_total']:<3} missed {m['moose_missed']:>2} "
+                      f"(dropped {m['moose_dropped']}, kept unidentified {m['moose_unidentified']}, "
+                      f"named other {m['moose_as_other']}) false-moose {m['false_moose']} "
                       f"tokens/photo {m['tokens_per_photo']:,}")
+    if not found:
+        print("no recordings with the current questions yet: run scripts/experiment.py dev (and devnb)")

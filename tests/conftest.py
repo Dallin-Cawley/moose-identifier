@@ -42,33 +42,47 @@ def parse_request(req: httpx2.Request, raw: bytes) -> SentRequest:
     return SentRequest(req.headers, body, assets)
 
 
-def answer(animal: float, moose: float, tokens: int = 1000, features: dict | None = None,
-           requested: dict | None = None) -> httpx2.Response:
-    """Fake Jev response for the production question sets.
+def answer(tokens: int = 1000, animal: float = 0.02, moose: float = 0.02, **others: float) -> httpx2.Response:
+    """Fake Jev response for the production questions.
 
-    `moose` goes to the moose option of both species Choices; feature Nouls default to 0.1.
-    `requested` (the request's questions) decides whether `animal` or `animal_self` style is used;
-    the answer key is always the question ID, so this only matters for IDs present.
+    animal: the `animal` Noul. moose: P(moose) in both species Choices; the rest of the Choice goes
+    mostly to deer. others: the human/dog/cougar/deer/elk Nouls (default 0.02, clearly absent).
     """
+    from pythonproject.questions import OTHER_ANIMALS, SPECIES
+    unknown = set(others) - set(OTHER_ANIMALS)
+    assert not unknown, f"not a question: {unknown}"
     rest = 1 - moose
-    probs = {"moose": moose, "deer": rest * 0.8, "elk": rest * 0.1, "small_animal": rest * 0.1}
+    probs = {"moose": moose, "deer": rest * 0.8, "elk": rest * 0.05, "cougar": rest * 0.05,
+             "dog": rest * 0.05, "small_animal": rest * 0.05}
+    assert set(probs) == set(SPECIES.criteria)
     choice = {"type": "choice", "choice": max(probs, key=probs.get), "probabilities": probs, "confidence": 0.5}
-    feats = {"f_pale_legs": 0.1, "f_hump": 0.1, "f_long_muzzle": 0.1, **(features or {})}
     return httpx2.Response(200, json={
         "model": "jev-1.14.0", "usage": {"input_tokens": tokens},
         "answers": {
             "animal": {"type": "noul", "noul": animal},
             "species": choice,
             "species_rev": {**choice, "probabilities": dict(reversed(list(probs.items())))},
-            **{k: {"type": "noul", "noul": v} for k, v in feats.items()},
+            **{a: {"type": "noul", "noul": others.get(a, 0.02)} for a in OTHER_ANIMALS},
         },
     })
+
+
+def make_labels(path="a.jpg", animal: float = 0.02, moose: float = 0.02, **others: float):
+    """Labels as the production code reads them, with the same species split as answer()."""
+    from pathlib import Path as _P
+    from pythonproject.labels import Labels
+    from pythonproject.questions import OTHER_ANIMALS
+    rest = 1 - moose
+    species = {"moose": moose, "deer": rest * 0.8, "elk": rest * 0.05, "cougar": rest * 0.05,
+               "dog": rest * 0.05, "small_animal": rest * 0.05}
+    probs = {"animal": animal, "species": species, **{a: others.get(a, 0.02) for a in OTHER_ANIMALS}}
+    return Labels(_P(path), probs, "jev-1.14.0", 100)
 
 
 @dataclass
 class FakeAPI:
     """Set `respond` to decide each answer; every request is recorded in `requests`."""
-    respond: Callable[[SentRequest], httpx2.Response] = lambda req: answer(0.9, 0.05)
+    respond: Callable[[SentRequest], httpx2.Response] = lambda req: answer(animal=0.9, deer=0.9)
     requests: list[SentRequest] = field(default_factory=list)
 
     async def handle(self, req: httpx2.Request) -> httpx2.Response:

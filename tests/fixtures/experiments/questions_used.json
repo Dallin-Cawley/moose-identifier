@@ -380,5 +380,131 @@
     "small_animal": "A smaller animal such as a raccoon, fox, bird, or rodent."
    }
   }
- }
+ },
+ "labels_v1": {
+  "human": {
+   "type": "noul",
+   "instructions": "Is there a person in `photo`?",
+   "criteria": {
+    "true": "A real person, or part of one such as legs or an arm, is visible.",
+    "false": "No person is visible. A person only on a sign, poster or screen doesn't count."
+   }
+  },
+  "dog": {
+   "type": "noul",
+   "instructions": "Is there a dog in `photo`?",
+   "criteria": {
+    "true": "A domestic dog of any breed or size is visible, even if only partly.",
+    "false": "No dog is visible. A coyote, fox or wolf is not a dog."
+   }
+  },
+  "cougar": {
+   "type": "noul",
+   "instructions": "Is there a cougar in `photo`?",
+   "criteria": {
+    "true": "A cougar (mountain lion, puma) is visible, even if only partly.",
+    "false": "No cougar is visible. A bobcat, lynx or house cat is not a cougar."
+   }
+  },
+  "deer": {
+   "type": "noul",
+   "instructions": "Is there a deer in `photo`?",
+   "criteria": {
+    "true": "A white-tailed deer or mule deer is visible, even if only partly.",
+    "false": "No deer is visible. An elk or a moose is not a deer."
+   }
+  },
+  "elk": {
+   "type": "noul",
+   "instructions": "Is there an elk in `photo`?",
+   "criteria": {
+    "true": "An elk (wapiti) is visible, even if only partly.",
+    "false": "No elk is visible. A deer or a moose is not an elk."
+   }
+  },
+  "moose": {
+   "type": "noul",
+   "instructions": "Is there a moose in `photo`?",
+   "criteria": {
+    "true": "A moose is visible, including calves, cows without antlers, and moose that are partly hidden or seen from behind.",
+    "false": "No moose is visible. A deer or an elk is not a moose."
+   }
+  }
+ },
+ "labels_v1_fingerprint": "7598e77a6cd2",
+ "labels": {
+  "animal": {
+   "type": "noul",
+   "instructions": "Is there a real, living animal in `photo`?",
+   "criteria": {
+    "true": "A real animal of any kind (mammal, bird, fish, reptile, insect, ...) is visible in the photo.",
+    "false": "The photo shows only people, objects, or scenery, or shows an animal only as a drawing, cartoon, toy, statue, or other depiction."
+   }
+  },
+  "species": {
+   "type": "choice",
+   "instructions": "Which kind of animal is in `photo`?",
+   "criteria": {
+    "moose": "A moose, including calves, cows without antlers, and moose that are partly hidden.",
+    "deer": "A white-tailed deer or mule deer.",
+    "elk": "An elk.",
+    "cougar": "A cougar (mountain lion).",
+    "dog": "A domestic dog.",
+    "small_animal": "A smaller animal such as a raccoon, fox, bird, or rodent."
+   }
+  },
+  "species_rev": {
+   "type": "choice",
+   "instructions": "Which kind of animal is in `photo`?",
+   "criteria": {
+    "small_animal": "A smaller animal such as a raccoon, fox, bird, or rodent.",
+    "dog": "A domestic dog.",
+    "cougar": "A cougar (mountain lion).",
+    "elk": "An elk.",
+    "deer": "A white-tailed deer or mule deer.",
+    "moose": "A moose, including calves, cows without antlers, and moose that are partly hidden."
+   }
+  },
+  "human": {
+   "type": "noul",
+   "instructions": "Is there a person in `photo`?",
+   "criteria": {
+    "true": "A real person, or part of one such as legs or an arm, is visible.",
+    "false": "No person is visible. A person only on a sign, poster or screen doesn't count."
+   }
+  },
+  "dog": {
+   "type": "noul",
+   "instructions": "Is there a dog in `photo`?",
+   "criteria": {
+    "true": "A domestic dog of any breed or size is visible, even if only partly.",
+    "false": "No dog is visible. A coyote, fox or wolf is not a dog."
+   }
+  },
+  "cougar": {
+   "type": "noul",
+   "instructions": "Is there a cougar in `photo`?",
+   "criteria": {
+    "true": "A cougar (mountain lion, puma) is visible, even if only partly.",
+    "false": "No cougar is visible. A bobcat, lynx or house cat is not a cougar."
+   }
+  },
+  "deer": {
+   "type": "noul",
+   "instructions": "Is there a deer in `photo`?",
+   "criteria": {
+    "true": "A white-tailed deer or mule deer is visible, even if only partly.",
+    "false": "No deer is visible. An elk or a moose is not a deer."
+   }
+  },
+  "elk": {
+   "type": "noul",
+   "instructions": "Is there an elk in `photo`?",
+   "criteria": {
+    "true": "An elk (wapiti) is visible, even if only partly.",
+    "false": "No elk is visible. A deer or a moose is not an elk."
+   }
+  }
+ },
+ "labels_fingerprint": "6a40f3c205c9"
 }

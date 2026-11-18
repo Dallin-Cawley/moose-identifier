@@ -10,9 +10,9 @@ from PIL import Image as PILImage
 from typesafe_sdk import AsyncTypeSafeClient, TypeSafeError
 
 from conftest import answer
-from pythonproject.classify import MAX_SIDE, MIN_SIDE, Category, is_infrared, prepare_image
+from pythonproject.classify import MAX_SIDE, MIN_SIDE, is_infrared, prepare_image
 from pythonproject.identify import SinglePhoto
-from pythonproject.questions import MODEL, MOOSE, SINGLE_QUESTIONS, questions_fingerprint
+from pythonproject.questions import ANIMALS, MODEL, OTHER_ANIMALS, SINGLE_QUESTIONS, questions_fingerprint
 
 
 def run_classify(path):
@@ -28,16 +28,16 @@ def test_payload(fake_api, make_photo):
 
     [sent] = fake_api.requests
     assert sent.body["model"] == MODEL == "jev-1.14.0"
+    # tier 1: animal? tier 2: which species (moose?), in both option orders. tier 3: the others.
     assert {k: v["type"] for k, v in sent.body["questions"].items()} == {
         "animal": "noul", "species": "choice", "species_rev": "choice",
-        "f_pale_legs": "noul", "f_hump": "noul", "f_long_muzzle": "noul"}
+        "human": "noul", "dog": "noul", "cougar": "noul", "deer": "noul", "elk": "noul"}
+    assert ANIMALS == ("human", "dog", "cougar", "deer", "elk", "moose")
+    order = list(sent.body["questions"]["species"]["criteria"])
+    assert "moose" in order and list(sent.body["questions"]["species_rev"]["criteria"]) == order[::-1]
     for qid, q in SINGLE_QUESTIONS.items():
         assert sent.body["questions"][qid]["instructions"] == q.instructions
         assert sent.body["questions"][qid]["criteria"] == q.criteria
-    assert MOOSE in sent.body["questions"]["species"]["criteria"]
-    # the two species questions list the same options in opposite orders
-    order = list(sent.body["questions"]["species"]["criteria"])
-    assert list(sent.body["questions"]["species_rev"]["criteria"]) == order[::-1]
 
     # the state is exactly one image reference, and its bytes are the prepared photo (banner cropped)
     ref = sent.body["state"]["photo"]
@@ -89,26 +89,11 @@ def test_questions_refer_to_state_field():
 
 
 def test_result_fields(fake_api, make_photo):
-    fake_api.respond = lambda req: answer(0.96, 0.91, tokens=1234, features={"f_hump": 0.8})
+    fake_api.respond = lambda req: answer(tokens=1234, animal=0.96, moose=0.91, dog=0.75)
     r = run_classify(make_photo("a.jpg", datetime(2024, 1, 1)))
-    assert (r.category, r.animal, r.species, r.model, r.input_tokens) == (
-        Category.MOOSE, 0.96, "moose", "jev-1.14.0", 1234)
-    assert r.moose == pytest.approx(0.91)
-    assert r.features == {"f_pale_legs": 0.1, "f_hump": 0.8, "f_long_muzzle": 0.1}
-
-
-def test_species_orders_are_averaged(fake_api, make_photo):
-    def respond(req):
-        resp = answer(0.95, 0.6)
-        body = resp.json()
-        rev = body["answers"]["species_rev"]
-        rev["probabilities"] = {"small_animal": 0.05, "elk": 0.05, "deer": 0.7, "moose": 0.2}
-        rev["choice"] = "deer"
-        return httpx2.Response(200, json=body)
-    fake_api.respond = respond
-    r = run_classify(make_photo("a.jpg", datetime(2024, 1, 1)))
-    assert r.moose == pytest.approx((0.6 + 0.2) / 2)
-    assert r.species == "deer"  # averaged: moose 0.40 vs deer (0.32 + 0.70) / 2 = 0.51
+    assert (r.animals, r.model, r.input_tokens) == (("dog", "moose"), "jev-1.14.0", 1234)
+    assert r.moose == pytest.approx(0.91) and r.species_top == "moose"
+    assert set(r.probabilities) == {"animal", "species", *OTHER_ANIMALS}
 
 
 @pytest.mark.parametrize("status", [400, 401, 429, 500])

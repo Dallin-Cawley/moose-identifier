@@ -1,20 +1,29 @@
 # moose-sort
 
-Sort trail-camera photos into 10-minute **events** and find the moose, using TypeSafe's
-[Jev](https://console.typesafe.ai/) model (`jev-1.14.0`).
+Label trail-camera photos with the animals in them and sort them into **events**, using TypeSafe's
+[Jev](https://console.typesafe.ai/) model (`jev-1.14.0`). The rules are in [SORTING_RULES.md](SORTING_RULES.md).
 
-Each photo is grouped by its EXIF capture time, Jev is asked whether it shows an animal and whether that
-animal is a moose, and the photo is symlinked into `<event>/<category>/`:
+1. Jev answers three questions about each photo, in order of priority: **is there an animal?**
+   (this decides the events), **is it a moose?**, and **which other animals?** (`human`, `dog`,
+   `cougar`, `deer`, `elk`). A photo can have several labels. One with an animal Jev couldn't
+   identify is `unidentified`; one with no animal is `no_animal`.
+2. Photos with an animal are grouped into events. An event ends after **10 minutes without an
+   animal** and has no maximum length. Photos without an animal belong to no event and are left out.
+3. Each event's photos are symlinked into a folder named after its start time and animals:
 
-| Folder                    | Meaning                                                               |
-|---------------------------|-----------------------------------------------------------------------|
-| `animal/moose`            | Jev is confident it's a moose (or a neighbouring frame was one)       |
-| `animal/not_moose`        | an animal, not a moose, and no moose was in the same event            |
-| `animal/not_moose_check`  | "not a moose", but a moose was in the same event; check these by eye  |
-| `no_animal`               | people, scenery, empty frames                                         |
-| `unsure`                  | Jev's answers were unsettled or contradictory                         |
+| Event | Contains | Folder |
+|---|---|---|
+| Moose event | only moose | `2024-10-30_164204_moose` |
+| Mixed event | moose and others | `2024-10-30_162804_moose-deer` |
+| Other | no moose | `2024-10-30_170804_human-dog` |
 
-The full rules, thresholds and the experiments behind them are in [SORTING_RULES.md](SORTING_RULES.md).
+On the 200-photo test set, every animal photo was detected, 107 of 112 moose photos were labelled
+moose (the other 5 still sit in their moose's event), and no other photo was labelled moose. See
+[SORTING_RULES.md](SORTING_RULES.md#6-how-well-it-works).
+
+Labels are stored in `labels.jsonl`, so **no photo is sent to Jev twice**. Exported copies carry
+their labels as XMP keywords that photo apps can search. The full rules, with examples, are in
+[SORTING_RULES.md](SORTING_RULES.md).
 
 ## Installation
 
@@ -59,13 +68,13 @@ first one it finds:
 # 1. See what it would cost; sends nothing and needs no key
 uv run moose-sort path/to/photos --estimate
 
-# 2. Sort (default: static 10-minute grid, event smoothing on)
+# 2. Sort (smoothing on). Running it again only pays for photos not labelled yet.
 uv run moose-sort path/to/photos -o sorted
 
-# Rolling windows instead (each event starts at the first photo not in the previous one)
-uv run moose-sort path/to/photos -o sorted_rolling --events rolling
+# Keep one label store per card, shared by every output folder
+uv run moose-sort path/to/photos -o sorted --labels path/to/photos/labels.jsonl
 
-# Classify and print only, create no links
+# Label and print only, create no links
 uv run moose-sort path/to/photos --dry-run
 
 # 3. Zip up an existing result to share it: no re-sorting, no API calls, no key needed
@@ -73,7 +82,8 @@ uv run moose-sort --export sorted --zip
 ```
 
 Already sorted and just want a shareable zip? `--export DIR --zip` takes the results folder of an
-earlier run, replaces its symlinks with copies of the original photos, and writes `DIR.zip` next to it.
+earlier run, replaces its symlinks with copies of the original photos (with their labels written in as
+keywords), and writes `DIR.zip` next to it.
 Leave out `--zip` to only resolve the links. See [Sharing the results](#sharing-the-results).
 
 | Option                  | Default         | Description                                                        |
@@ -82,12 +92,12 @@ Leave out `--zip` to only resolve the links. See [Sharing the results](#sharing-
 | `-c, --config PATH`     | `./moose-sort.hcl` | HCL config file (see [Configuration file](#configuration-file)) |
 | `--no-config`           | off             | ignore `./moose-sort.hcl` even if it exists                        |
 | `-o, --out DIR`         | `./sorted`      | output directory                                                   |
-| `-e, --events`          | `static`        | `static` (fixed grid from the first photo) or `rolling`            |
-| `--smooth / --no-smooth`| on              | promote a photo to moose when its neighbouring frame is one        |
-| `--estimate`            | off             | print the estimated cost and exit                                  |
+| `--labels PATH`         | `<out>/labels.jsonl` | label store and cache; share it to reuse labels across folders |
+| `--smooth / --no-smooth`| on              | confirm an animal Jev was unsure about when the next frame shows it |
+| `--estimate`            | off             | print the cost of photos not yet labelled, and exit                |
 | `-j, --concurrency N`   | `8`             | parallel requests                                                  |
-| `-n, --dry-run`         | off             | classify and print only                                            |
-| `--[no-]resolve-links`  | off             | replace the output's symlinks with copies of the originals         |
+| `-n, --dry-run`         | off             | label and print only; writes nothing (answers aren't stored)       |
+| `--[no-]resolve-links`  | off             | replace the output's symlinks with keyword-tagged copies           |
 | `--[no-]zip`            | off             | resolve links, then zip the output folder (to `<out>.zip`)         |
 | `--zip-path PATH`       | `<out>.zip`     | where to write the zip (implies `--zip`)                           |
 | `--export DIR`          | —               | don't sort: resolve an earlier run's results folder, zip with `--zip` |
@@ -96,9 +106,10 @@ Leave out `--zip` to only resolve the links. See [Sharing the results](#sharing-
 
 Tips:
 
-- **Process a whole card at once.** Static windows are anchored at the earliest photo in the input, and
-  smoothing only sees neighbours in the same run.
-- **Use a separate output folder per event strategy**; they produce different event folders.
+- **Process a whole card at once.** Events and smoothing only see the photos in the same run. Thanks
+  to the label store, re-running with more photos only pays for the new ones.
+- If some Jev calls fail, the run exits with code 1 and events around those photos may be split.
+  Run it again: only the failed photos are sent.
 - Photos without an EXIF capture time are reported and left unsorted (exit code 1).
 
 ### Configuration file
@@ -118,11 +129,11 @@ inputs = [
 # Where the event folders go.
 output = "sorted"
 
-# "static": fixed 10-minute grid from the first photo; "rolling": each event starts at
-# the first photo that doesn't fit in the previous one.
-events = "static"
+# The label store: every photo's labels, and the cache that keeps photos from being sent to
+# Jev twice. Default: labels.jsonl inside the output folder.
+labels = "~/trailcam/card-12/labels.jsonl"
 
-# Promote a photo to moose when the frame next to it, in the same event, is a moose.
+# Confirm an animal Jev was unsure about when the frame right before or after shows it for sure.
 smoothing = true
 
 # Parallel requests to TypeSafe.
@@ -153,7 +164,7 @@ How settings combine:
 - **Relative paths are relative to the config file's folder**, not the current directory, and `~` is
   expanded. A config file works the same wherever you run it from.
 - Every setting is optional, and a mistake is a usage error naming the file and setting: an unknown
-  name, a wrong type, an invalid `events` value, or HCL syntax. Variables and interpolation (`${...}`)
+  name, a wrong type, or HCL syntax. `events`, from earlier versions, is reported as removed. Variables and interpolation (`${...}`)
   aren't supported; write values literally.
 - `--estimate` and `--dry-run` are command-line only.
 - **If the config sets `inputs`, running with no photos sorts them**, which calls the API and costs
@@ -165,20 +176,24 @@ How settings combine:
 
 ```
 sorted/
-├── results.jsonl          # one line per photo: event, category, probabilities, input_tokens, ...
-├── events.csv             # one row per event: start, end, and counts per category
-├── event_0000_2024-10-08_090313/
-│   ├── animal/
-│   │   ├── moose/STC_0005.JPG -> /path/to/photos/STC_0005.JPG
-│   │   ├── not_moose/
-│   │   └── not_moose_check/
-│   ├── no_animal/
-│   └── unsure/
-└── ...
+├── labels.jsonl           # label store: one line per photo (content hash, probabilities, labels)
+├── results.jsonl          # this run, one line per photo: time, event, labels, probabilities, ...
+├── events.csv             # one row per event: folder, name, type, start, end, photos, per-animal counts
+├── 2024-10-30_162804_moose-deer/
+│   ├── STC_3120.JPG -> /path/to/photos/STC_3120.JPG
+│   └── STC_3121.JPG -> /path/to/photos/STC_3121.JPG
+├── 2024-10-30_164204_moose/
+├── 2024-10-30_170804_human-dog/
+└── unsure/                # symlinks to photos with an animal Jev couldn't identify
 ```
 
+`unsure/` lists, as symlinks, every photo that surely shows an animal Jev couldn't identify. Those
+photos are also in their event folder; `unsure/` is for checking them by eye. It stays links-only after
+export, and the zip stores them as symlinks (no photo is duplicated).
+
 By default the photos are never moved or copied, only symlinked. Re-running on the same photos reuses
-existing links.
+existing links. A photo whose event changed, for example after relabelling, is moved and its old
+link removed.
 
 ### Sharing the results
 
@@ -199,52 +214,54 @@ uv run moose-sort --export sorted --zip-path ~/share/moose-results.zip
   there's nothing to re-sort and no photos to name. It always resolves the links; the zip is only
   written with `--zip` or `--zip-path` (or `zip`/`zip_path` in the config file). It ignores `-o` and
   the config file's `inputs`.
-- **`--resolve-links`** replaces each symlink with a copy of the original photo, at the same path and with
-  the same name and timestamps. The originals are never moved or changed. It's safe to run again, and
-  re-sorting into a resolved folder doesn't duplicate photos.
+- **`--resolve-links`** replaces each symlink in the event folders (not in `unsure/`) with a copy of the original photo, at the same path and with
+  the same name and timestamps, and **writes the photo's labels into the copy as XMP keywords**
+  (`dc:subject`: e.g. `moose`, `deer`). Lightroom, digiKam, darktable, Windows Explorer ("Tags") and
+  macOS can search and filter by them. The image isn't re-encoded: pixels and camera EXIF stay exactly as
+  they were. The originals are never moved or changed. It's safe to run again, and re-sorting into a
+  resolved folder doesn't duplicate photos.
 - **`--zip`** resolves links first, then writes `<out>.zip` next to the output folder, with the folder as
   its top-level entry. Photos are stored uncompressed (JPEGs don't shrink further, and it's much faster);
-  `results.jsonl` and `events.csv` are compressed.
+  `labels.jsonl`, `results.jsonl` and `events.csv` are compressed.
 - If an original has gone missing, its link is reported and left in place, no zip is written, and the
   exit code is 1.
 - **Disk space:** copies take as much space as the originals, and so does the zip (about 7 GB each for
   a 5,000-photo card).
-- **Privacy:** the copies are byte-for-byte originals, so they keep the camera's EXIF data, including GPS
-  if the camera records it. `results.jsonl` contains each original's absolute path on your machine.
+- **Privacy:** apart from the added keywords, the copies are the originals, so they keep the camera's EXIF
+  data, including GPS if the camera records it. `labels.jsonl` and `results.jsonl` contain each
+  original's absolute path on your machine.
 
 ## Cost estimation
 
 Jev bills **input tokens only**: **$0.042 per million tokens** for `jev-1.14.0` (TypeSafe's listed price
-on 2026-11-15; output tokens are free). Each photo is one request of about **4,377 tokens** (measured on
-432 photos, banner cropped, 1568×833), so roughly **$0.00018 per photo**.
+on 2026-11-15; output tokens are free). Each photo is **one request**, with all the questions, of
+about **4,400 tokens** (measured), so roughly **$0.00018 per photo**.
 
-| Volume                       | Estimated cost |
+| New photos                   | Estimated cost |
 |------------------------------|----------------|
-| 1 photo                      | $0.00018       |
 | 1,000 photos                 | $0.18          |
 | 5,061 photos (one SD card)   | ~$0.94         |
 | 50,000 photos (~10 cards)    | ~$9.20         |
-| 100,000 photos               | ~$18.40        |
-| 1,000,000 photos             | ~$184          |
 
-**Rule of thumb: about $0.18 per 1,000 photos.** Event smoothing and the check folder are computed
-locally and cost nothing. Always run `--estimate` first for your actual photo set.
+**Photos already in the label store cost nothing**: re-runs, re-sorting into another folder, or adding
+photos to a card only pay for photos not labelled yet. `--estimate` counts only those. Smoothing is
+computed locally and is free. See [SORTING_RULES.md](SORTING_RULES.md#5-keeping-the-number-of-jev-calls-down)
+for what keeps the number of calls down.
 
-What changes the estimate:
-
-- **Re-running pays again**: nothing is cached.
+- **Changing a question's wording relabels everything** on the next run (the store remembers which
+  wording made each label); changing a threshold doesn't.
 - **A different camera/resolution** changes tokens per photo; `results.jsonl` records `input_tokens` for
-  every photo so you can check.
+  every photo sent.
 - **Price or model changes**: `src/pythonproject/questions.py` pins `jev-1.14.0` and `PRICE_PER_TOKEN`;
   update both together.
-- The production CLI has **no spending cap**; `--estimate` is the safeguard. (The experiment scripts are
+- The production CLI has **no spending cap**; `--estimate` is the safeguard. (The experiment script is
   capped, see below.)
 
 ## Development
 
 ```sh
 uv run pytest                     # ~100 tests, a few seconds, never calls the API
-uv run python tests/replay.py     # accuracy table from recorded Jev answers (free)
+uv run python tests/replay.py     # accuracy table from recorded Jev answers (free, once recorded)
 ```
 
 Every test runs against a fake API (`tests/conftest.py`), so no test can reach TypeSafe or spend money.
@@ -253,7 +270,7 @@ Live experiments (`scripts/experiment.py`) go through a spending guard: every re
 `.typesafe_spend.jsonl` and refused once the total would pass `TYPESAFE_BUDGET_USD` (default $2.00).
 
 ```sh
-uv run python scripts/experiment.py dev B_nobanner --estimate   # cost only
+uv run python scripts/experiment.py dev --estimate   # cost only
 uv run python -m pythonproject.budget --report                  # spend so far
 ```
 

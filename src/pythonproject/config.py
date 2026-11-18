@@ -2,7 +2,7 @@
 
     inputs      = ["~/trailcam/card-12"]
     output      = "sorted"
-    events      = "static"
+    labels      = "~/trailcam/labels.jsonl"
     smoothing   = true
     concurrency = 8
 
@@ -45,11 +45,16 @@ class Setting:
 TOP: dict[str, Setting] = {
     "inputs": Setting("inputs", list),
     "output": Setting("out", Path),
-    "events": Setting("events", str, ("rolling", "static")),
+    "labels": Setting("labels", Path),
     "smoothing": Setting("smooth", bool),
     "concurrency": Setting("concurrency", int),
     "api_key": Setting("api_key", str),
     "api_key_file": Setting("api_key_file", Path),
+}
+# settings that used to exist, and why they're gone
+REMOVED: dict[str, str] = {
+    "events": "events are now defined by animal activity (SORTING_RULES.md), so there is nothing to choose; "
+              "delete the line",
 }
 EXPORT: dict[str, Setting] = {
     "resolve_links": Setting("resolve_links", bool),
@@ -110,6 +115,8 @@ def parse_config(text: str, base: Path, source: str = "<config>") -> dict:
 
     def take(items: dict, table: dict[str, Setting], where: str) -> None:
         for name, value in items.items():
+            if not where and name in REMOVED:
+                raise ConfigError(f"{source}: setting '{name}' was removed: {REMOVED[name]}")
             if name not in table:
                 allowed = sorted(table) + ([] if where else ["export { ... }"])
                 raise ConfigError(f"{source}: unknown setting '{where}{name}'; "

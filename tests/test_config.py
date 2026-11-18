@@ -6,7 +6,8 @@ import pytest
 
 import pythonproject
 from pythonproject.config import ConfigError, find_config, parse_config
-from test_cli import run_cli, tree, files_in, scene, key_file, isolated_cwd, sent_key, no_default_key  # noqa: F401
+from test_cli import (LINKED, MOOSE, REPORTS, run_cli, tree, files_in, scene, key_file,  # noqa: F401
+                      isolated_cwd, sent_key, no_default_key)
 
 BASE = Path("/base")
 
@@ -15,8 +16,8 @@ def test_full_example_parses():
     cfg = parse_config('''
         # trail camera on the north ridge
         inputs      = ["photos", "~/more", "/abs/card"]
-        output      = "sorted_rolling"
-        events      = "rolling"
+        output      = "sorted_ridge"
+        labels      = "ridge/labels.jsonl"
         smoothing   = false
         concurrency = 4
         api_key_file = "keys/typesafe"   // relative to the config file
@@ -29,8 +30,8 @@ def test_full_example_parses():
     ''', BASE)
     assert cfg == {
         "inputs": [BASE / "photos", Path("~/more").expanduser(), Path("/abs/card")],
-        "out": BASE / "sorted_rolling",
-        "events": "rolling",
+        "out": BASE / "sorted_ridge",
+        "labels": BASE / "ridge/labels.jsonl",
         "smooth": False,
         "concurrency": 4,
         "api_key_file": BASE / "keys/typesafe",
@@ -51,7 +52,8 @@ def test_single_input_string_is_accepted():
 @pytest.mark.parametrize("text, message", [
     ('outptu = "x"', "unknown setting 'outptu'"),
     ('export {\n  zipp = true\n}', "unknown setting 'export.zipp'"),
-    ('events = "hourly"', "must be one of rolling, static"),
+    ('events = "static"', "setting 'events' was removed: events are now defined by animal activity"),
+    ('labels = ""', "expected a path string"),
     ('smoothing = "no"', "expected true or false"),
     ('concurrency = "8"', "expected a whole number"),
     ('concurrency = 0', "must be at least 1"),
@@ -86,13 +88,13 @@ def write(path: Path, text: str) -> Path:
 def test_config_supplies_inputs_output_and_key(scene, tmp_path, key_file, isolated_cwd):
     cfg = write(tmp_path / "ms.hcl", f'inputs = ["{scene}"]\noutput = "out"\napi_key_file = "{key_file}"\n')
     assert run_cli("--config", cfg) == 0
-    assert len(tree(tmp_path / "out")) == 5          # output is relative to the config file's folder
+    assert len(tree(tmp_path / "out")) == LINKED     # output is relative to the config file's folder
 
 
 def test_default_config_in_cwd_is_used(scene, tmp_path, key_file, isolated_cwd):
     write(isolated_cwd / "moose-sort.hcl", f'inputs = ["{scene}"]\napi_key_file = "{key_file}"\n')
     assert run_cli() == 0
-    assert len(tree(isolated_cwd / "sorted")) == 5
+    assert len(tree(isolated_cwd / "sorted")) == LINKED
 
 
 def test_no_config_ignores_default_file(scene, tmp_path, isolated_cwd, fake_api):
@@ -102,31 +104,24 @@ def test_no_config_ignores_default_file(scene, tmp_path, isolated_cwd, fake_api)
 
 
 def test_command_line_overrides_config(scene, tmp_path, key_file):
-    cfg = write(tmp_path / "ms.hcl", f'inputs = ["{scene}"]\noutput = "cfg_out"\nevents = "static"\n'
+    cfg = write(tmp_path / "ms.hcl", f'inputs = ["{scene}"]\noutput = "cfg_out"\nlabels = "cfg_labels.jsonl"\n'
                                      f'api_key_file = "{key_file}"\n')
     out = tmp_path / "cli_out"
-    run_cli("--config", cfg, "-o", out, "-e", "rolling")
-    assert not (tmp_path / "cfg_out").exists()
-    assert {p.split("/")[0] for p in tree(out)} == {"event_0000_2024-10-30_162804", "event_0001_2024-10-30_164004"}
+    run_cli("--config", cfg, "-o", out, "--labels", tmp_path / "cli_labels.jsonl")
+    assert not (tmp_path / "cfg_out").exists() and not (tmp_path / "cfg_labels.jsonl").exists()
+    assert len(tree(out)) == LINKED and (tmp_path / "cli_labels.jsonl").is_file()
 
 
 def test_smoothing_false_in_config_and_smooth_flag(tmp_path, key_file, fake_api, make_photo):
-    from datetime import datetime, timedelta
-    from conftest import answer
-    from test_cli import by_photo
-    from pythonproject.classify import prepare_image
-    t0 = datetime(2024, 10, 30, 16, 28, 4)
-    table = {}
-    for i, (name, mo) in enumerate([("a.jpg", 0.9), ("b.jpg", 0.2), ("c.jpg", 0.9)]):
-        p = make_photo(name, t0 + timedelta(minutes=i), folder=tmp_path / "walk", color=(i * 70, 50, 50))
-        table[prepare_image(p, crop_banner=True)] = (0.97, mo)
-    fake_api.respond = by_photo(table)
-    cfg = write(tmp_path / "ms.hcl", f'inputs = ["{tmp_path / "walk"}"]\nsmoothing = false\n'
+    from test_cli import labels_of, make_scene
+    walk = make_scene(make_photo, fake_api, tmp_path / "walk",
+                      {"a.jpg": (0, {"animal": 0.95, "moose": 0.95}), "b.jpg": (1, {"animal": 0.95, "moose": 0.3})})
+    cfg = write(tmp_path / "ms.hcl", f'inputs = ["{walk}"]\nsmoothing = false\n'
                                      f'api_key_file = "{key_file}"\n')
     run_cli("--config", cfg, "-o", tmp_path / "off")
-    assert "event_0000_2024-10-30_162804/animal/not_moose_check/b.jpg" in tree(tmp_path / "off")
+    assert labels_of(tmp_path / "off")["b.jpg"]["labels"] == ["unidentified"]
     run_cli("--config", cfg, "-o", tmp_path / "on", "--smooth")
-    assert "event_0000_2024-10-30_162804/animal/moose/b.jpg" in tree(tmp_path / "on")
+    assert labels_of(tmp_path / "on")["b.jpg"]["labels"] == ["moose"]
 
 
 def test_cli_inputs_replace_config_inputs(scene, tmp_path, key_file, make_photo, fake_api):
@@ -134,7 +129,7 @@ def test_cli_inputs_replace_config_inputs(scene, tmp_path, key_file, make_photo,
     other.mkdir()
     cfg = write(tmp_path / "ms.hcl", f'inputs = ["{other}"]\napi_key_file = "{key_file}"\n')
     run_cli("--config", cfg, scene, "-o", tmp_path / "out")
-    assert len(tree(tmp_path / "out")) == 5
+    assert len(tree(tmp_path / "out")) == LINKED
 
 
 def test_cli_key_beats_config_key(scene, tmp_path, sent_key, no_default_key):
@@ -158,7 +153,7 @@ def test_no_zip_flag_overrides_config(scene, tmp_path, key_file):
                                      'export {\n  zip = true\n  zip_path = "share/moose.zip"\n}\n')
     run_cli("--config", cfg, "-o", tmp_path / "out", "--no-zip")
     assert not (tmp_path / "share/moose.zip").exists()
-    assert len(tree(tmp_path / "out")) == 5        # no export at all: still links
+    assert len(tree(tmp_path / "out")) == LINKED   # no export at all: still links
 
 
 def test_export_ignores_config_inputs(scene, tmp_path, key_file, fake_api):
@@ -168,7 +163,7 @@ def test_export_ignores_config_inputs(scene, tmp_path, key_file, fake_api):
     cfg = write(tmp_path / "ms.hcl", f'inputs = ["{scene}"]\noutput = "elsewhere"\n')
     assert run_cli("--config", cfg, "--export", out) == 0
     assert len(fake_api.requests) == sent          # nothing sent
-    assert tree(out) == [] and len(files_in(out)) == 5 + 2
+    assert tree(out) == [] and len(files_in(out)) == LINKED + len(REPORTS)
 
 
 def test_bad_config_is_usage_error(tmp_path, fake_api):
@@ -183,5 +178,5 @@ def test_readme_example_config_is_valid():
     readme = (Path(__file__).resolve().parents[1] / "README.md").read_text()
     [example] = re.findall(r"```hcl\n(.*?)```", readme, re.S)
     cfg = parse_config(example, BASE)
-    assert set(cfg) == {"inputs", "out", "events", "smooth", "concurrency", "api_key_file",
+    assert set(cfg) == {"inputs", "out", "labels", "smooth", "concurrency", "api_key_file",
                         "resolve_links", "zip", "zip_path"}

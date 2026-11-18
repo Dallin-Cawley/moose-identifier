@@ -1,7 +1,7 @@
 [project]
 name = "pythonproject"
 version = "0.1.0"
-description = "Sort trail-camera photos into 10-minute events and find the moose, using TypeSafe's Jev model."
+description = "Label trail-camera photos with the animals in them and sort them into activity events, using TypeSafe's Jev model."
 readme = "README.md"
 authors = [
     { name = "timmy2654", email = "lettergrade39@gmail.com" }

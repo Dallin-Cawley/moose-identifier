@@ -1,12 +1,22 @@
-"""Group photos into time-based events. See SORTING_RULES.md for the rules."""
+"""Group labelled photos into events, following SORTING_RULES.md (which has examples).
 
-from abc import ABC, abstractmethod
+- Only photos with an animal take part; photos without one belong to no event. A photo with an
+  animal Jev couldn't identify (UNIDENTIFIED) takes part too: it keeps the event going.
+- An event has no maximum length. It ends when WINDOW (10 minutes) passes with no animal detected:
+  a photo with an animal taken WINDOW or more after the previous one starts a new event.
+- The event's name is its animals joined by "-": moose first (SORTING_RULES.md: `moose` and
+  `moose-<others>`), then the others in SORTING_RULES.md order (human, dog, cougar, deer, elk).
+  Unidentified photos don't add to the name; an event of only those is named `unidentified`.
+"""
+
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from PIL import Image
+
+from .questions import ANIMALS, MOOSE, UNIDENTIFIED
 
 WINDOW = timedelta(minutes=10)
 
@@ -25,60 +35,58 @@ def read_timestamp(path: Path) -> datetime:
     return datetime.strptime(str(raw).strip("\x00 "), "%Y:%m:%d %H:%M:%S")
 
 
+def event_name(animals) -> str:
+    """'moose', 'moose-deer', 'deer-elk', ...: moose first, then SORTING_RULES.md order.
+
+    'unidentified' only when no animal of SORTING_RULES.md was identified anywhere in the event.
+    """
+    present = set(animals)
+    order = [MOOSE] + [a for a in ANIMALS if a != MOOSE]
+    return "-".join(a for a in order if a in present) or (UNIDENTIFIED if UNIDENTIFIED in present else "")
+
+
 @dataclass(frozen=True)
 class Event:
-    index: int
-    start: datetime
-    end: datetime  # exclusive
+    start: datetime                 # first photo with an animal
+    end: datetime                   # last photo with an animal (inclusive)
+    animals: tuple[str, ...]        # in event_name order
+    photos: tuple[Path, ...]        # in time order
+
+    @property
+    def name(self) -> str:
+        return event_name(self.animals)
+
+    @property
+    def is_moose(self) -> bool:
+        """Moose event: only moose. A moose with others is a mixed event (SORTING_RULES.md 2.2)."""
+        return self.animals == (MOOSE,)
+
+    @property
+    def is_mixed(self) -> bool:
+        return MOOSE in self.animals and len(self.animals) > 1
 
     @property
     def folder(self) -> str:
-        return f"event_{self.index:04d}_{self.start:%Y-%m-%d_%H%M%S}"
+        """Start time first, so folders sort in time order and repeated names stay unique."""
+        return f"{self.start:%Y-%m-%d_%H%M%S}_{self.name}"
 
 
-class EventStrategy(ABC):
-    name: str
+def group_events(photos: Sequence[tuple[Path, datetime, Sequence[str]]],
+                 window: timedelta = WINDOW) -> list[Event]:
+    """(path, capture time, labels) for each photo -> events, in time order.
 
-    def __init__(self, window: timedelta = WINDOW) -> None:
-        self.window = window
-
-    @abstractmethod
-    def assign(self, timestamps: Sequence[datetime]) -> list[Event]:
-        """Return one Event per timestamp, in the same order as the input."""
-
-
-class StaticWindows(EventStrategy):
-    """Fixed grid anchored at the earliest photo; index = window number (gaps where empty)."""
-
-    name = "static"
-
-    def assign(self, timestamps: Sequence[datetime]) -> list[Event]:
-        if not timestamps:
-            return []
-        anchor = min(timestamps)
-        events = []
-        for t in timestamps:
-            index = (t - anchor) // self.window
-            start = anchor + index * self.window
-            events.append(Event(index, start, start + self.window))
-        return events
-
-
-class RollingWindows(EventStrategy):
-    """A new event starts at the first photo not covered by the previous event's window."""
-
-    name = "rolling"
-
-    def assign(self, timestamps: Sequence[datetime]) -> list[Event]:
-        events: list[Event | None] = [None] * len(timestamps)
-        current: Event | None = None
-        for i in sorted(range(len(timestamps)), key=timestamps.__getitem__):
-            t = timestamps[i]
-            if current is None or t >= current.end:
-                index = 0 if current is None else current.index + 1
-                current = Event(index, t, t + self.window)
-            events[i] = current
-        return events  # type: ignore[return-value]
-
-
-STRATEGIES: dict[str, type[EventStrategy]] = {s.name: s for s in (StaticWindows, RollingWindows)}
+    labels: the identified animals, or ("unidentified",); empty = no animal, left out.
+    Input order doesn't matter.
+    """
+    with_animals = sorted(((t, p, tuple(a)) for p, t, a in photos if a), key=lambda x: x[0])
+    groups: list[list[tuple[datetime, Path, tuple[str, ...]]]] = []
+    for item in with_animals:
+        if not groups or item[0] - groups[-1][-1][0] >= window:
+            groups.append([])
+        groups[-1].append(item)
+    events = []
+    for g in groups:
+        animals = {a for _, _, labels in g for a in labels}
+        order = event_name(animals).split("-")
+        events.append(Event(g[0][0], g[-1][0], tuple(order), tuple(p for _, p, _ in g)))
+    return events
